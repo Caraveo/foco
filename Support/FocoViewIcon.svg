@@ -5,7 +5,7 @@
       <stop offset="0.52" stop-color="#07090C"/>
       <stop offset="1" stop-color="#101A20"/>
     </linearGradient>
-    <linearGradient id="glow" x1="340" y1="290" x2="710" y2="740" gradientUnits="userSpaceOnUse">
+    <linearGradient id="glow" x1="270" y1="350" x2="760" y2="680" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FFFFFF"/>
       <stop offset="1" stop-color="#8EE9FF"/>
     </linearGradient>
@@ -14,10 +14,8 @@
     </filter>
   </defs>
   <rect x="72" y="72" width="880" height="880" rx="205" fill="url(#bg)" filter="url(#shadow)"/>
-  <path d="M512 218C356.536 218 230.5 344.036 230.5 499.5C230.5 596.15 279.77 681.08 347.8 734.1V801.5C347.8 827.457 368.843 848.5 394.8 848.5H629.2C655.157 848.5 676.2 827.457 676.2 801.5V734.1C744.23 681.08 793.5 596.15 793.5 499.5C793.5 344.036 667.464 218 512 218Z" stroke="url(#glow)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M413 893H611" stroke="#BCEFFF" stroke-width="38" stroke-linecap="round"/>
-  <path d="M337 500C382.5 429.5 440.833 394.25 512 394.25C583.167 394.25 641.5 429.5 687 500C641.5 570.5 583.167 605.75 512 605.75C440.833 605.75 382.5 570.5 337 500Z" fill="#D9F8FF" fill-opacity="0.13" stroke="#FFFFFF" stroke-width="28" stroke-linejoin="round"/>
-  <circle cx="512" cy="500" r="62" fill="#8EE9FF"/>
-  <circle cx="512" cy="500" r="29" fill="#071015"/>
-  <circle cx="534" cy="478" r="12" fill="white" fill-opacity="0.9"/>
+  <path d="M218 512C294.5 390 392.5 329 512 329C631.5 329 729.5 390 806 512C729.5 634 631.5 695 512 695C392.5 695 294.5 634 218 512Z" fill="#D9F8FF" fill-opacity="0.10" stroke="url(#glow)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="512" r="126" fill="#8EE9FF"/>
+  <circle cx="512" cy="512" r="61" fill="#071015"/>
+  <circle cx="555" cy="469" r="25" fill="white" fill-opacity="0.92"/>
 </svg>
