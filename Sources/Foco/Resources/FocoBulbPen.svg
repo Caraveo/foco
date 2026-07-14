@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Foco bulb and pen icon</title>
-  <desc id="desc">A minimal white light bulb and pen on a warm coral rounded square.</desc>
+  <desc id="desc">A minimal white light bulb containing a fountain pen nib on a warm coral rounded square.</desc>
   <defs>
     <linearGradient id="background" x1="160" y1="96" x2="864" y2="928" gradientUnits="userSpaceOnUse">
       <stop stop-color="#E16B54"/>
@@ -9,8 +9,11 @@
   </defs>
   <rect width="1024" height="1024" rx="224" fill="url(#background)"/>
   <g fill="none" stroke="#FFFFFF" stroke-width="70" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M438 217C230 217 192 430 293 554c25 30 34 52 39 85h166c8-36 21-58 43-88"/>
-    <path d="M337 716h145M362 793h90"/>
+    <path d="M512 176c-190 0-294 210-194 366 25 39 35 61 39 101h310c4-40 14-62 39-101 100-156-4-366-194-366Z"/>
+    <path d="M366 720h292M405 797h214"/>
   </g>
-  <path d="M466 598 720 260c24-32 83 13 59 45L525 643l-76 27 17-72Z" fill="#FFFFFF"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m512 280 130 158c-44 17-88 63-130 130-42-67-86-113-130-130l130-158Z" stroke-width="54"/>
+    <path d="M512 366v128" stroke-width="42"/>
+  </g>
 </svg>
