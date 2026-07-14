@@ -7,6 +7,7 @@ struct WorkspaceView: View {
     @State private var selectedPageID: VaultPage.ID?
     @State private var showingImporter = false
     @State private var pendingKind: InsertKind?
+    @State private var pendingInsertionOffset: Int?
     @State private var sidebarVisible = true
     @State private var isDropTargeted = false
 
@@ -35,7 +36,8 @@ struct WorkspaceView: View {
                         ),
                         assets: document.currentAssets,
                         assetURL: document.materialize,
-                        onInsertAsset: requestAsset
+                        onInsertAsset: requestAsset,
+                        onDeleteAsset: document.deleteAsset
                     )
                         .id(document.currentPage?.id)
                 } else {
@@ -72,8 +74,14 @@ struct WorkspaceView: View {
         .onChange(of: selectedPageID) { _, pageID in document.selectPage(pageID) }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: allowedTypes) { result in
             guard case .success(let url) = result, let kind = pendingKind else { return }
+            let insertionOffset = pendingInsertionOffset
             pendingKind = nil
-            importFile(url, as: kind == .file ? InsertKind.detected(for: url) : kind)
+            pendingInsertionOffset = nil
+            importFile(
+                url,
+                as: kind == .file ? InsertKind.detected(for: url) : kind,
+                insertionUTF16Offset: insertionOffset
+            )
         }
     }
 
@@ -127,21 +135,29 @@ struct WorkspaceView: View {
         document.deletePage(page)
         selectedPageID = document.manifest.pages.first?.id
     }
-    private func requestAsset(_ kind: InsertKind) { pendingKind = kind; showingImporter = true }
+    private func requestAsset(_ kind: InsertKind, insertionUTF16Offset: Int) {
+        pendingKind = kind
+        pendingInsertionOffset = insertionUTF16Offset
+        showingImporter = true
+    }
     private func importDroppedFiles(_ urls: [URL]) -> Bool {
         let files = urls.filter { url in
             guard url.isFileURL else { return false }
             return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
         }
         guard !files.isEmpty, document.currentPage != nil else { return false }
-        for file in files { importFile(file, as: InsertKind.detected(for: file)) }
+        for file in files { importFile(file, as: InsertKind.detected(for: file), insertionUTF16Offset: nil) }
         return true
     }
 
-    private func importFile(_ url: URL, as kind: InsertKind) {
+    private func importFile(_ url: URL, as kind: InsertKind, insertionUTF16Offset: Int?) {
         Task {
             do {
-                _ = try await document.importAsset(from: url, mediaType: kind.label)
+                _ = try await document.importAsset(
+                    from: url,
+                    mediaType: kind.label,
+                    insertionUTF16Offset: insertionUTF16Offset
+                )
             } catch {
                 NSApp.presentError(error)
             }

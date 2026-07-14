@@ -117,7 +117,8 @@ struct EditorView: View {
     @Binding var page: VaultPage
     let assets: [VaultAsset]
     let assetURL: @Sendable (VaultAsset) -> URL?
-    let onInsertAsset: (InsertKind) -> Void
+    let onInsertAsset: (InsertKind, Int) -> Void
+    let onDeleteAsset: (VaultAsset) -> Void
     @State private var slashQuery: String?
     @State private var slashAnchor = CGPoint.zero
     @State private var editorFrame = CGRect.zero
@@ -167,6 +168,15 @@ struct EditorView: View {
                                 slashAnchor: $slashAnchor,
                                 selectedRange: $selectedRange,
                                 editorHeight: $editorHeight,
+                                assets: referencedAssets,
+                                assetURL: assetURL,
+                                onDeleteAsset: deleteAsset,
+                                onMoveAsset: { assetID, offset in
+                                    moveAsset(assetID, toUTF16Offset: offset)
+                                },
+                                onMoveAssetBy: { assetID, direction in
+                                    moveAsset(assetID, by: direction)
+                                },
                                 onSlashKey: handleSlashKey
                             )
                                 .frame(height: editorHeight)
@@ -181,10 +191,6 @@ struct EditorView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                        if !referencedAssets.isEmpty {
-                            AssetPreviewGallery(assets: referencedAssets, assetURL: assetURL)
-                                .padding(.top, 18)
-                        }
                         Spacer().frame(height: 160)
                     }
                     .frame(maxWidth: 720, alignment: .leading)
@@ -231,7 +237,7 @@ struct EditorView: View {
         if kind.needsFile {
             page.content = (page.content as NSString).replacingCharacters(in: replacementRange, with: "")
             selectedRange = NSRange(location: insertionLocation, length: 0)
-            onInsertAsset(kind)
+            onInsertAsset(kind, insertionLocation)
             return
         }
         let value: String
@@ -257,6 +263,54 @@ struct EditorView: View {
         }
         page.content = (page.content as NSString).replacingCharacters(in: replacementRange, with: value)
         selectedRange = NSRange(location: insertionLocation + value.utf16.count, length: 0)
+    }
+
+    private func deleteAsset(_ assetID: UUID) {
+        guard let asset = assets.first(where: { $0.id == assetID }) else { return }
+        page.content = AssetBlockSyntax.removing(assetID, from: page.content)
+        onDeleteAsset(asset)
+    }
+
+    private func moveAsset(_ assetID: UUID, by direction: Int) {
+        var lines = page.content.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(where: { line in
+            AssetBlockSyntax.matches(in: line).contains { $0.assetID == assetID }
+        }) else { return }
+
+        if direction < 0 {
+            var target = index - 1
+            while target >= 0 && lines[target].trimmingCharacters(in: .whitespaces).isEmpty { target -= 1 }
+            guard target >= 0 else { return }
+            let block = lines.remove(at: index)
+            lines.insert(block, at: target)
+        } else {
+            var target = index + 1
+            while target < lines.count && lines[target].trimmingCharacters(in: .whitespaces).isEmpty { target += 1 }
+            guard target < lines.count else { return }
+            let block = lines.remove(at: index)
+            let adjustedTarget = target > index ? target - 1 : target
+            lines.insert(block, at: min(lines.count, adjustedTarget + 1))
+        }
+        page.content = lines.joined(separator: "\n")
+    }
+
+    private func moveAsset(_ assetID: UUID, toUTF16Offset offset: Int) {
+        var lines = page.content.components(separatedBy: "\n")
+        guard let sourceIndex = lines.firstIndex(where: { line in
+            AssetBlockSyntax.matches(in: line).contains { $0.assetID == assetID }
+        }) else { return }
+
+        let source = page.content as NSString
+        let safeOffset = min(max(0, offset), source.length)
+        let prefix = source.substring(to: safeOffset)
+        var targetIndex = prefix.reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        let block = lines.remove(at: sourceIndex)
+        if sourceIndex < targetIndex { targetIndex -= 1 }
+        targetIndex = min(max(0, targetIndex), lines.count)
+        lines.insert(block, at: targetIndex)
+        page.content = lines.joined(separator: "\n")
     }
 
     private func handleSlashKey(_ key: SlashKey) {
@@ -396,6 +450,44 @@ private enum SlashKey {
 private final class FocoTextView: NSTextView {
     var slashMenuVisible: (() -> Bool)?
     var onSlashKey: ((SlashKey) -> Void)?
+    var onDeleteAsset: ((UUID) -> Void)?
+    var onMoveAsset: ((UUID, Int) -> Void)?
+    var onMoveAssetBy: ((UUID, Int) -> Void)?
+    private var inlineAssetViews: [UUID: NSHostingView<AnyView>] = [:]
+    private var inlineAssets: [UUID: VaultAsset] = [:]
+    private var dragInsertionIndex: Int?
+
+    func configureInlineAssets(
+        _ assets: [VaultAsset],
+        assetURL: @escaping @Sendable (VaultAsset) -> URL?
+    ) {
+        inlineAssets = Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) })
+        let desiredIDs = Set(assets.map(\.id))
+        let staleIDs = inlineAssetViews.keys.filter { !desiredIDs.contains($0) }
+        for id in staleIDs {
+            inlineAssetViews[id]?.removeFromSuperview()
+            inlineAssetViews[id] = nil
+        }
+        for asset in assets where inlineAssetViews[asset.id] == nil {
+            let hostedView = NSHostingView(rootView: AnyView(
+                AssetPreviewCard(
+                    asset: asset,
+                    materialize: { assetURL(asset) },
+                    onDelete: { [weak self] in self?.onDeleteAsset?(asset.id) },
+                    onMoveUp: { [weak self] in self?.onMoveAssetBy?(asset.id, -1) },
+                    onMoveDown: { [weak self] in self?.onMoveAssetBy?(asset.id, 1) },
+                    dragProvider: {
+                        NSItemProvider(object: "foco-asset:\(asset.id.uuidString)" as NSString)
+                    }
+                )
+            ))
+            hostedView.wantsLayer = true
+            hostedView.layer?.cornerRadius = 10
+            addSubview(hostedView)
+            inlineAssetViews[asset.id] = hostedView
+        }
+        needsLayout = true
+    }
 
     override func keyDown(with event: NSEvent) {
         if slashMenuVisible?() == true {
@@ -423,9 +515,163 @@ private final class FocoTextView: NSTextView {
         insertText("\n\(continuation)", replacementRange: selectedRange())
     }
 
+    override func deleteBackward(_ sender: Any?) {
+        guard !deleteAdjacentAsset(backward: true) else { return }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        guard !deleteAdjacentAsset(backward: false) else { return }
+        super.deleteForward(sender)
+    }
+
+    override func cut(_ sender: Any?) {
+        let matches = assetMatches(intersecting: selectedRange())
+        if !matches.isEmpty {
+            setSelectedRange(expandedSelection(selectedRange(), for: matches))
+        }
+        super.cut(sender)
+        matches.forEach { onDeleteAsset?($0.assetID) }
+    }
+
+    override func paste(_ sender: Any?) {
+        let matches = assetMatches(intersecting: selectedRange())
+        if !matches.isEmpty {
+            setSelectedRange(expandedSelection(selectedRange(), for: matches))
+        }
+        super.paste(sender)
+        matches.forEach { onDeleteAsset?($0.assetID) }
+    }
+
+    override func layout() {
+        super.layout()
+        layoutInlineAssetViews()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         drawBlockDecorations()
         super.draw(dirtyRect)
+        drawDragInsertionIndicator()
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        draggedAssetID(from: sender) == nil ? super.draggingEntered(sender) : .move
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard draggedAssetID(from: sender) != nil else { return super.draggingUpdated(sender) }
+        let point = convert(sender.draggingLocation, from: nil)
+        dragInsertionIndex = characterIndexForInsertion(at: point)
+        needsDisplay = true
+        return .move
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        dragInsertionIndex = nil
+        needsDisplay = true
+        super.draggingExited(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let assetID = draggedAssetID(from: sender) else { return super.performDragOperation(sender) }
+        let point = convert(sender.draggingLocation, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        dragInsertionIndex = nil
+        needsDisplay = true
+        onMoveAsset?(assetID, index)
+        return true
+    }
+
+    private func deleteAdjacentAsset(backward: Bool) -> Bool {
+        let selection = selectedRange()
+        var matches = assetMatches(intersecting: selection)
+        if matches.isEmpty && selection.length == 0 {
+            let cursor = selection.location
+            matches = AssetBlockSyntax.matches(in: string).filter { match in
+                let start = match.lineRange.location
+                let end = NSMaxRange(match.lineRange)
+                if cursor >= start && cursor <= end { return true }
+                return backward ? end == cursor : start == cursor
+            }
+            if matches.count > 1 {
+                matches = [backward ? matches.last! : matches.first!]
+            }
+        }
+        guard !matches.isEmpty else { return false }
+        let deletionRange = expandedSelection(selection, for: matches)
+        guard shouldChangeText(in: deletionRange, replacementString: "") else { return true }
+        textStorage?.replaceCharacters(in: deletionRange, with: "")
+        setSelectedRange(NSRange(location: deletionRange.location, length: 0))
+        didChangeText()
+        matches.forEach { onDeleteAsset?($0.assetID) }
+        return true
+    }
+
+    private func assetMatches(intersecting selection: NSRange) -> [AssetBlockMatch] {
+        let matches = AssetBlockSyntax.matches(in: string)
+        if selection.length == 0 { return [] }
+        return matches.filter { NSIntersectionRange($0.lineRange, selection).length > 0 }
+    }
+
+    private func expandedSelection(_ selection: NSRange, for matches: [AssetBlockMatch]) -> NSRange {
+        matches.reduce(selection) { NSUnionRange($0, $1.lineRange) }
+    }
+
+    private func draggedAssetID(from sender: any NSDraggingInfo) -> UUID? {
+        guard let value = sender.draggingPasteboard.string(forType: .string),
+              value.hasPrefix("foco-asset:") else { return nil }
+        return UUID(uuidString: String(value.dropFirst("foco-asset:".count)))
+    }
+
+    private func layoutInlineAssetViews() {
+        guard let layoutManager, let textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let matches = AssetBlockSyntax.matches(in: string)
+        let visibleIDs = Set(matches.map(\.assetID))
+        for (id, hostedView) in inlineAssetViews {
+            guard visibleIDs.contains(id),
+                  let asset = inlineAssets[id],
+                  let match = matches.first(where: { $0.assetID == id }),
+                  let lineRect = visualRect(
+                    for: match.tokenRange,
+                    layoutManager: layoutManager,
+                    textContainer: textContainer
+                  ) else {
+                hostedView.isHidden = true
+                continue
+            }
+            hostedView.isHidden = false
+            hostedView.frame = NSRect(
+                x: textContainerOrigin.x,
+                y: lineRect.minY + 6,
+                width: max(0, bounds.width - textContainerOrigin.x * 2),
+                height: asset.inlinePreviewHeight
+            )
+        }
+    }
+
+    private func drawDragInsertionIndicator() {
+        guard let index = dragInsertionIndex,
+              let layoutManager,
+              let textContainer,
+              !string.isEmpty else { return }
+        let location = min(index, max(0, (string as NSString).length - 1))
+        guard let rect = visualRect(
+            for: NSRange(location: location, length: 1),
+            layoutManager: layoutManager,
+            textContainer: textContainer
+        ) else { return }
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(
+            roundedRect: NSRect(
+                x: textContainerOrigin.x,
+                y: rect.minY - 2,
+                width: max(0, bounds.width - textContainerOrigin.x * 2),
+                height: 3
+            ),
+            xRadius: 1.5,
+            yRadius: 1.5
+        ).fill()
     }
 
     private func lineContinuation() -> String? {
@@ -566,6 +812,11 @@ private struct RichTextEditor: NSViewRepresentable {
     @Binding var slashAnchor: CGPoint
     @Binding var selectedRange: NSRange
     @Binding var editorHeight: CGFloat
+    let assets: [VaultAsset]
+    let assetURL: @Sendable (VaultAsset) -> URL?
+    let onDeleteAsset: (UUID) -> Void
+    let onMoveAsset: (UUID, Int) -> Void
+    let onMoveAssetBy: (UUID, Int) -> Void
     let onSlashKey: (SlashKey) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -604,6 +855,16 @@ private struct RichTextEditor: NSViewRepresentable {
         view.onSlashKey = { [weak coordinator = context.coordinator] key in
             coordinator?.parent.onSlashKey(key)
         }
+        view.onDeleteAsset = { [weak coordinator = context.coordinator] assetID in
+            coordinator?.parent.onDeleteAsset(assetID)
+        }
+        view.onMoveAsset = { [weak coordinator = context.coordinator] assetID, offset in
+            coordinator?.parent.onMoveAsset(assetID, offset)
+        }
+        view.onMoveAssetBy = { [weak coordinator = context.coordinator] assetID, direction in
+            coordinator?.parent.onMoveAssetBy(assetID, direction)
+        }
+        view.configureInlineAssets(assets, assetURL: assetURL)
         context.coordinator.style(view)
         context.coordinator.updateHeight(view)
         return view
@@ -611,16 +872,21 @@ private struct RichTextEditor: NSViewRepresentable {
 
     func updateNSView(_ view: FocoTextView, context: Context) {
         context.coordinator.parent = self
-        guard view.string != text else { return }
-        view.string = text
-        let location = min(selectedRange.location, text.utf16.count)
-        let length = min(selectedRange.length, max(0, text.utf16.count - location))
-        view.setSelectedRange(NSRange(location: location, length: length))
+        view.configureInlineAssets(assets, assetURL: assetURL)
+        let contentChanged = view.string != text
+        if contentChanged {
+            view.string = text
+            let location = min(selectedRange.location, text.utf16.count)
+            let length = min(selectedRange.length, max(0, text.utf16.count - location))
+            view.setSelectedRange(NSRange(location: location, length: length))
+        }
         context.coordinator.style(view)
         context.coordinator.updateHeight(view)
-        DispatchQueue.main.async {
-            view.window?.makeFirstResponder(view)
-            context.coordinator.updateSlashAnchor(view)
+        if contentChanged {
+            DispatchQueue.main.async {
+                view.window?.makeFirstResponder(view)
+                context.coordinator.updateSlashAnchor(view)
+            }
         }
     }
 
@@ -800,14 +1066,18 @@ private struct RichTextEditor: NSViewRepresentable {
                 }
             }
 
-            if let assetRegex = try? NSRegularExpression(pattern: #"\[\[asset:[^\]]+\]\]"#) {
-                assetRegex.enumerateMatches(in: storage.string, range: all) { match, _, _ in
-                    guard let range = match?.range else { return }
-                    storage.addAttributes([
-                        .foregroundColor: NSColor.controlAccentColor,
-                        .font: NSFont.systemFont(ofSize: 14, weight: .medium)
-                    ], range: range)
-                }
+            let assetsByID = Dictionary(uniqueKeysWithValues: parent.assets.map { ($0.id, $0) })
+            for match in AssetBlockSyntax.matches(in: storage.string) {
+                guard let asset = assetsByID[match.assetID] else { continue }
+                let assetParagraph = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                assetParagraph.minimumLineHeight = asset.inlinePreviewHeight + 12
+                assetParagraph.maximumLineHeight = asset.inlinePreviewHeight + 12
+                assetParagraph.paragraphSpacing = 0
+                storage.addAttributes([
+                    .foregroundColor: NSColor.clear,
+                    .font: NSFont.systemFont(ofSize: 1),
+                    .paragraphStyle: assetParagraph
+                ], range: match.tokenRange)
             }
 
             if let markdownLink = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\((https?://[^\s)]+)\)"#) {
@@ -848,6 +1118,7 @@ private struct RichTextEditor: NSViewRepresentable {
                 .paragraphStyle: paragraph
             ]
             view.needsDisplay = true
+            view.needsLayout = true
             styling = false
         }
 

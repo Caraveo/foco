@@ -3,6 +3,20 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension VaultAsset {
+    var inlinePreviewHeight: CGFloat {
+        switch mediaType.lowercased() {
+        case "video": 368
+        case "pdf": 398
+        case "image": 338
+        case "audio": 120
+        default: 142
+        }
+    }
+
+    var previewContentHeight: CGFloat { max(82, inlinePreviewHeight - 38) }
+}
+
 struct AssetPreviewGallery: View {
     let assets: [VaultAsset]
     let assetURL: @Sendable (VaultAsset) -> URL?
@@ -16,15 +30,20 @@ struct AssetPreviewGallery: View {
     }
 }
 
-private struct AssetPreviewCard: View {
+struct AssetPreviewCard: View {
     let asset: VaultAsset
     let materialize: @Sendable () -> URL?
+    var onDelete: (() -> Void)? = nil
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
+    var dragProvider: (() -> NSItemProvider)? = nil
     @State private var localURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             preview
             HStack(spacing: 8) {
+                dragHandle
                 Image(systemName: assetIcon)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -36,6 +55,15 @@ private struct AssetPreviewCard: View {
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(.tertiary)
+                if let onMoveUp {
+                    assetButton("arrow.up", help: "Move block up", action: onMoveUp)
+                }
+                if let onMoveDown {
+                    assetButton("arrow.down", help: "Move block down", action: onMoveDown)
+                }
+                if let onDelete {
+                    assetButton("trash", help: "Delete attachment", action: onDelete)
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 38)
@@ -43,6 +71,12 @@ private struct AssetPreviewCard: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.10)))
+        .contextMenu {
+            if let onMoveUp { Button("Move Up", systemImage: "arrow.up", action: onMoveUp) }
+            if let onMoveDown { Button("Move Down", systemImage: "arrow.down", action: onMoveDown) }
+            if onMoveUp != nil || onMoveDown != nil { Divider() }
+            if let onDelete { Button("Delete Attachment", systemImage: "trash", role: .destructive, action: onDelete) }
+        }
     }
 
     @ViewBuilder
@@ -54,17 +88,18 @@ private struct AssetPreviewCard: View {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: 460)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: asset.previewContentHeight)
                         .background(Color.black.opacity(0.025))
                 } else {
                     unavailable
                 }
             case "pdf":
                 LocalPDFPreview(url: localURL)
-                    .frame(height: 420)
+                    .frame(height: asset.previewContentHeight)
             case "video":
                 LocalVideoPreview(url: localURL)
-                    .frame(height: 390)
+                    .frame(height: asset.previewContentHeight)
                     .background(Color.black)
             case "audio":
                 LocalVideoPreview(url: localURL, audioOnly: true)
@@ -77,7 +112,7 @@ private struct AssetPreviewCard: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity)
-                .frame(height: 150)
+                .frame(height: asset.previewContentHeight)
                 .task {
                     let materialize = materialize
                     localURL = await Task.detached(priority: .utility) { materialize() }.value
@@ -100,11 +135,12 @@ private struct AssetPreviewCard: View {
             Spacer()
         }
         .padding(18)
+        .frame(height: asset.previewContentHeight)
     }
 
     private var unavailable: some View {
         ContentUnavailableView("Preview unavailable", systemImage: assetIcon)
-            .frame(height: 150)
+            .frame(height: asset.previewContentHeight)
     }
 
     private var assetIcon: String {
@@ -115,6 +151,31 @@ private struct AssetPreviewCard: View {
         case "pdf": "doc.richtext"
         default: "doc"
         }
+    }
+
+    @ViewBuilder
+    private var dragHandle: some View {
+        if let dragProvider {
+            Image(systemName: "square.grid.3x3.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .frame(width: 18, height: 24)
+                .contentShape(Rectangle())
+                .help("Drag to move this block")
+                .onDrag(dragProvider)
+        }
+    }
+
+    private func assetButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
     }
 }
 

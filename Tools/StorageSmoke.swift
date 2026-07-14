@@ -22,7 +22,8 @@ struct StorageSmoke {
         try writer.close()
         defer { try? FileManager.default.removeItem(at: source) }
 
-        let asset = try await document.importAsset(from: source, mediaType: "Video")
+        let asset = try await document.importAsset(from: source, mediaType: "Video", insertionUTF16Offset: 0)
+        precondition(document.currentPage?.content.hasPrefix(AssetBlockSyntax.token(for: asset)) == true)
         let snapshot = try document.snapshot(contentType: .focoBulb)
         let values = try snapshot.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
         precondition(values.isRegularFile == true && values.isDirectory != true)
@@ -40,7 +41,14 @@ struct StorageSmoke {
         guard let preview = document.materialize(asset) else { fatalError("Could not extract asset") }
         let previewSize = try preview.resourceValues(forKeys: [.fileSizeKey]).fileSize
         precondition(previewSize == 3 * 1_048_576 + 123)
-        print("Storage smoke check passed: one ZIP file, real page/media entries, exact extraction.")
+
+        document.deleteAsset(asset)
+        let deletedSnapshot = try document.snapshot(contentType: .focoBulb)
+        let listingAfterDelete = try run("/usr/bin/unzip", ["-Z1", deletedSnapshot.path])
+        precondition(!listingAfterDelete.contains("Assets/\(asset.storedFilename)"))
+        precondition(document.manifest.assets.allSatisfy { $0.id != asset.id })
+        precondition(document.currentPage?.content.contains(asset.id.uuidString) == false)
+        print("Storage smoke check passed: inline media token, exact extraction, and archive deletion.")
     }
 
     private static func run(_ executable: String, _ arguments: [String]) throws -> String {

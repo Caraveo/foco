@@ -17,8 +17,10 @@ This repository contains a working local-first prototype:
 - Rendered dividers, tables, code blocks, quotes, prompts, and automatic clickable `http://` and `https://` links
 - Automatic continuation for bulleted lists, numbered lists, checklists, quotes, and table rows
 - Assets are copied into the `.bulb`, so the document remains portable
+- Attachments are true inline blocks that can be dragged or moved up/down between text
 - Images and PDFs are previewed directly on the page
 - Video and audio use native playback controls and work completely offline
+- Backspace/Delete and the attachment menu remove both the inline block and its stored archive file
 - Drag files from Finder onto a page with automatic PDF, image, video, and audio detection
 - Automatic local saves through the macOS document system
 
@@ -66,6 +68,7 @@ The app requires macOS 14 or newer.
 - Type `/` to open the block menu directly beneath the cursor. Continue typing to filter it, use ↑/↓ to move, Return to insert, or Escape to close it. Mouse selection also works.
 - Paste or type an `http://` or `https://` address to create a clickable link automatically.
 - Drag one or several files anywhere over the workspace to attach them to the selected page; Foco detects their type from macOS metadata and filename extension.
+- Move an attachment with its drag handle or arrow controls. Put the caret against an attachment and press Backspace/Delete to remove it.
 - Attachments are real files inside the bulb archive. Images and PDFs render inline, video and audio have native playback controls, and other files show a local attachment card.
 
 ## Product principles

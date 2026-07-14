@@ -18,8 +18,64 @@ struct VaultAsset: Codable, Identifiable, Hashable, Sendable {
     var byteSize: Int64? = nil
 }
 
+struct AssetBlockMatch: Sendable {
+    let assetID: UUID
+    let tokenRange: NSRange
+    let lineRange: NSRange
+}
+
+/// Attachments live in page Markdown as atomic block tokens. The editor hides
+/// the token and mounts the native preview in its place, while the token keeps
+/// ordering portable and understandable outside Foco.
+enum AssetBlockSyntax {
+    static func token(for asset: VaultAsset) -> String {
+        let filename = asset.filename
+            .replacingOccurrences(of: "]", with: "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        return "[[asset:\(asset.id.uuidString)|\(filename)]]"
+    }
+
+    static func matches(in content: String) -> [AssetBlockMatch] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\[\[asset:([0-9A-Fa-f-]{36})\|[^\]\r\n]*\]\]"#
+        ) else { return [] }
+        let source = content as NSString
+        return regex.matches(in: content, range: NSRange(location: 0, length: source.length)).compactMap { match in
+            guard match.range(at: 1).location != NSNotFound,
+                  let id = UUID(uuidString: source.substring(with: match.range(at: 1))) else { return nil }
+            return AssetBlockMatch(
+                assetID: id,
+                tokenRange: match.range,
+                lineRange: source.lineRange(for: match.range)
+            )
+        }
+    }
+
+    static func contains(_ assetID: UUID, in content: String) -> Bool {
+        matches(in: content).contains { $0.assetID == assetID }
+    }
+
+    static func inserting(_ asset: VaultAsset, into content: String, atUTF16Offset offset: Int?) -> String {
+        let source = content as NSString
+        let location = min(max(0, offset ?? source.length), source.length)
+        let prefix = source.substring(to: location)
+        let suffix = source.substring(from: location)
+        var block = token(for: asset)
+        if !prefix.isEmpty && !prefix.hasSuffix("\n") { block = "\n" + block }
+        if !suffix.isEmpty && !suffix.hasPrefix("\n") { block += "\n" }
+        if suffix.isEmpty { block += "\n" }
+        return prefix + block + suffix
+    }
+
+    static func removing(_ assetID: UUID, from content: String) -> String {
+        guard let match = matches(in: content).first(where: { $0.assetID == assetID }) else { return content }
+        return (content as NSString).replacingCharacters(in: match.lineRange, with: "")
+    }
+}
+
 struct VaultManifest: Codable, Sendable {
-    var version = 4
+    var version = 5
     var title = "Untitled Bulb"
     /// Page content is stored separately in `Pages/<id>.md`; these are summaries.
     var pages = [VaultPage(title: "Welcome", content: "")]
@@ -101,10 +157,17 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
         do {
             if let currentPage { try archive.persist(page: currentPage, manifest: manifest) }
             guard let id else { currentPage = nil; currentAssets = []; return }
-            let page = try archive.loadPage(id: id, manifest: manifest)
-            currentPage = page
+            var page = try archive.loadPage(id: id, manifest: manifest)
             let ids = Set(page.assetIDs ?? [])
-            currentAssets = manifest.assets.filter { ids.contains($0.id) }
+            let pageAssets = manifest.assets.filter { ids.contains($0.id) }
+            var migratedInlineAssets = false
+            for asset in pageAssets where !AssetBlockSyntax.contains(asset.id, in: page.content) {
+                page.content = AssetBlockSyntax.inserting(asset, into: page.content, atUTF16Offset: nil)
+                migratedInlineAssets = true
+            }
+            currentPage = page
+            currentAssets = pageAssets
+            if migratedInlineAssets { try archive.persist(page: page, manifest: manifest) }
         } catch {
             report(error)
         }
@@ -152,14 +215,19 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
         }
     }
 
-    func importAsset(from url: URL, mediaType: String) async throws -> VaultAsset {
+    func importAsset(from url: URL, mediaType: String, insertionUTF16Offset: Int? = nil) async throws -> VaultAsset {
         guard let pageID = currentPage?.id else { throw BulbArchiveError.noSelectedPage }
         if let currentPage { try archive.persist(page: currentPage, manifest: manifest) }
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         let archive = archive
         let result = try await Task.detached(priority: .userInitiated) {
-            try archive.importAsset(from: url, mediaType: mediaType, pageID: pageID)
+            try archive.importAsset(
+                from: url,
+                mediaType: mediaType,
+                pageID: pageID,
+                insertionUTF16Offset: insertionUTF16Offset
+            )
         }.value
         await MainActor.run {
             manifest = result.manifest
@@ -167,6 +235,27 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
             currentPage = result.page
         }
         return result.asset
+    }
+
+    func deleteAsset(_ asset: VaultAsset) {
+        guard var page = currentPage, (page.assetIDs ?? []).contains(asset.id) else { return }
+        do {
+            page.content = AssetBlockSyntax.removing(asset.id, from: page.content)
+            page.assetIDs?.removeAll { $0 == asset.id }
+            if let pageIndex = manifest.pages.firstIndex(where: { $0.id == page.id }) {
+                manifest.pages[pageIndex].title = page.title
+                manifest.pages[pageIndex].assetIDs = page.assetIDs
+            }
+            let usedElsewhere = manifest.pages.contains { summary in
+                summary.id != page.id && (summary.assetIDs ?? []).contains(asset.id)
+            }
+            if !usedElsewhere { manifest.assets.removeAll { $0.id == asset.id } }
+            try archive.deleteAsset(asset, from: page, removeFile: !usedElsewhere, manifest: manifest)
+            currentPage = page
+            currentAssets.removeAll { $0.id == asset.id }
+        } catch {
+            report(error)
+        }
     }
 
     func materialize(_ asset: VaultAsset) -> URL? {
@@ -273,7 +362,12 @@ private final class BulbArchive: @unchecked Sendable {
         }
     }
 
-    func importAsset(from source: URL, mediaType: String, pageID: UUID) throws -> (asset: VaultAsset, page: VaultPage, manifest: VaultManifest) {
+    func importAsset(
+        from source: URL,
+        mediaType: String,
+        pageID: UUID,
+        insertionUTF16Offset: Int?
+    ) throws -> (asset: VaultAsset, page: VaultPage, manifest: VaultManifest) {
         try locked {
             var manifest = try loadManifest()
             guard let pageIndex = manifest.pages.firstIndex(where: { $0.id == pageID }) else { throw BulbArchiveError.noSelectedPage }
@@ -286,9 +380,30 @@ private final class BulbArchive: @unchecked Sendable {
             var ids = manifest.pages[pageIndex].assetIDs ?? []
             ids.append(id)
             manifest.pages[pageIndex].assetIDs = ids
+            var page = try loadPage(id: pageID, manifest: manifest)
+            page.assetIDs = ids
+            page.content = AssetBlockSyntax.inserting(
+                asset,
+                into: page.content,
+                atUTF16Offset: insertionUTF16Offset
+            )
+            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
             try writeManifest(manifest)
-            let page = try loadPage(id: pageID, manifest: manifest)
             return (asset, page, manifest)
+        }
+    }
+
+    func deleteAsset(_ asset: VaultAsset, from page: VaultPage, removeFile: Bool, manifest: VaultManifest) throws {
+        try locked {
+            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+            if removeFile {
+                try delete(entries: [assetEntry(asset)])
+                let cached = workingDirectory
+                    .appendingPathComponent("Preview", isDirectory: true)
+                    .appendingPathComponent(assetEntry(asset))
+                try? FileManager.default.removeItem(at: cached)
+            }
+            try writeManifest(manifest)
         }
     }
 
@@ -309,7 +424,7 @@ private final class BulbArchive: @unchecked Sendable {
         let old = try JSONDecoder().decode(VaultManifest.self, from: json)
         let archive = try BulbArchive.temporary()
         var manifest = old
-        manifest.version = 4
+        manifest.version = 5
         manifest.pages = old.pages.map { VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs) }
         try archive.initialize(manifest: manifest, pages: old.pages)
         for asset in old.assets {
@@ -326,7 +441,7 @@ private final class BulbArchive: @unchecked Sendable {
 
     private func writeManifest(_ manifest: VaultManifest) throws {
         var portable = manifest
-        portable.version = 4
+        portable.version = 5
         portable.pages = portable.pages.map { VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
