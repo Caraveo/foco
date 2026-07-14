@@ -13,6 +13,8 @@ Every workspace is saved as a transferable `.bulb` document (for example, `Resea
 
 Both apps work completely locally. Foco remains the owning macOS editor for `.bulb`; Foco View registers separately with the `Viewer` role so it appears in Finder’s **Open With** menu without replacing the editor.
 
+A native Windows 11 reader is available in [`win11`](win11/README.md). It opens the same portable `.bulb` files read-only with a WinUI 3 interface.
+
 ## What works today
 
 This repository contains a working local-first prototype:

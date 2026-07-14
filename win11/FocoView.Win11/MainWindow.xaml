@@ -1,0 +1,65 @@
+<Window
+    x:Class="FocoView.Win11.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="Foco View">
+  <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+    <Grid x:Name="AppTitleBar" Grid.Row="0" Padding="16,0" Background="Transparent">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <Border Width="28" Height="28" CornerRadius="7" Background="#171D22">
+          <FontIcon Glyph="&#xE890;" Foreground="White" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock x:Name="TitleText" Text="Foco View" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <Border Padding="7,2" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+          <TextBlock Text="READ ONLY" FontSize="9" FontWeight="Bold" CharacterSpacing="70"/>
+        </Border>
+      </StackPanel>
+      <Button Grid.Column="1" Click="Open_Click" VerticalAlignment="Center" Margin="0,0,140,0">
+        <StackPanel Orientation="Horizontal" Spacing="7"><FontIcon Glyph="&#xE8E5;"/><TextBlock Text="Open bulb"/></StackPanel>
+      </Button>
+    </Grid>
+
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="42"/></Grid.RowDefinitions>
+        <TextBlock Text="PAGES" Margin="16,15,12,8" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <ListView x:Name="PagesList" Grid.Row="1" Margin="8,0" SelectionChanged="PagesList_SelectionChanged"
+                  IsItemClickEnabled="True" SelectionMode="Single">
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Grid Height="36" Padding="8,0"><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE8A5;" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+              </Grid>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="7" Margin="14,0" VerticalAlignment="Center">
+          <FontIcon Glyph="&#xE72E;" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+          <TextBlock Text="Viewing locally" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+        </StackPanel>
+      </Grid>
+      <Rectangle Grid.Column="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+
+      <Grid Grid.Column="2">
+        <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+          <FontIcon Glyph="&#xE890;" FontSize="42" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+          <TextBlock Text="Open a Foco bulb" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+          <TextBlock Text="Read pages and play local media without editing the original file." Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+          <Button Content="Open .bulb…" Click="Open_Click" HorizontalAlignment="Center" Style="{StaticResource AccentButtonStyle}"/>
+        </StackPanel>
+        <ProgressRing x:Name="LoadingRing" IsActive="False" Visibility="Collapsed" Width="32" Height="32"/>
+        <ScrollViewer x:Name="ReaderScroll" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="ReaderPanel" Width="760" MaxWidth="760" Padding="0,48,0,120" HorizontalAlignment="Center"/>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>
