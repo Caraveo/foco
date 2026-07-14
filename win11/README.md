@@ -19,6 +19,8 @@ Requirements: Windows 11, Visual Studio 2022 with **.NET desktop development** a
 2. Select `x64` or `ARM64`.
 3. Build and run `FocoView.Win11`.
 
+Alternatively, run the **Build Windows 11 reader** workflow in GitHub Actions. Its `FocoView-Windows-x64` artifact contains the self-contained Windows executable and its runtime files.
+
 The project is unpackaged and self-contained for straightforward local testing. To make `.bulb` files open on double-click, package the app as MSIX and declare a `windows.fileTypeAssociation` for `.bulb`, or associate `.bulb` with the built executable in Windows Settings. The app accepts a bulb path as its first command-line argument.
 
 PDF and arbitrary file attachments are opened with the user's default Windows application; images, video, and audio render inline.

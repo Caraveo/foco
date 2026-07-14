@@ -1,0 +1,52 @@
+name: Build Windows 11 reader
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "win11/**"
+      - ".github/workflows/build-win11.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build x64 executable
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish Foco View
+        shell: pwsh
+        run: >-
+          dotnet publish win11/FocoView.Win11/FocoView.Win11.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:Platform=x64
+          -p:WindowsPackageType=None
+          --output artifacts/FocoView-Windows-x64
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          $exe = "artifacts/FocoView-Windows-x64/FocoView.Win11.exe"
+          if (-not (Test-Path $exe)) { throw "Expected executable was not produced: $exe" }
+          Get-Item $exe | Format-List Name, Length, LastWriteTime
+
+      - name: Upload Windows reader
+        uses: actions/upload-artifact@v4
+        with:
+          name: FocoView-Windows-x64
+          path: artifacts/FocoView-Windows-x64/
+          if-no-files-found: error
+          retention-days: 30
