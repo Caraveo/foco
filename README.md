@@ -4,6 +4,15 @@ Foco is a native macOS, document-based workspace inspired by Notion, with one im
 
 Every workspace is saved as a transferable `.bulb` document (for example, `Research.bulb`). A bulb contains its pages, writing, links, prompts, PDFs, videos, images, and other attachments. There is no account, server, sync engine, analytics SDK, or required internet connection.
 
+## Two native apps
+
+| App | Edition | Purpose |
+| --- | --- | --- |
+| **Foco** | Paid editor | Create, edit, organize, attach, and save `.bulb` documents. |
+| **Foco View** | Free viewer | Open and read `.bulb` documents with inline PDF, image, video, and audio playback. It has no save or mutation path. |
+
+Both apps work completely locally. Foco remains the owning macOS editor for `.bulb`; Foco View registers separately with the `Viewer` role so it appears in Finder’s **Open With** menu without replacing the editor.
+
 ## What works today
 
 This repository contains a working local-first prototype:
@@ -59,6 +68,16 @@ open ~/Applications/Foco.app
 
 The installer creates a signed local app bundle, declares `app.foco.bulb` as an editable document type, and registers Foco as its owner with Launch Services. Running the raw SwiftPM executable alone cannot register a macOS document extension.
 
+Build or install the free read-only viewer separately:
+
+```bash
+swift run FocoView
+./Scripts/install-viewer-app.sh
+open ~/Applications/Foco\ View.app
+```
+
+The viewer installs as `~/Applications/Foco View.app` with bundle identifier `app.foco.viewer`, a distinct icon, no Save command, and read-only `.bulb` registration.
+
 The app requires macOS 14 or newer.
 
 ## Editing
@@ -102,6 +121,16 @@ swiftc -parse-as-library Sources/Foco/VaultDocument.swift Tools/StorageSmoke.swi
   -o /tmp/foco-storage-smoke \
   -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers
 /tmp/foco-storage-smoke
+```
+
+Verify that Foco View lazily reads the manifest, one page, and one asset without changing the source file:
+
+```bash
+swiftc -parse-as-library \
+  Sources/Foco/VaultDocument.swift Sources/FocoView/ViewerDocument.swift Tools/ViewerSmoke.swift \
+  -o /tmp/foco-viewer-smoke \
+  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers
+/tmp/foco-viewer-smoke
 ```
 
 ## Privacy
