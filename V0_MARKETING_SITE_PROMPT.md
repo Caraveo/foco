@@ -1,29 +1,29 @@
 # Foco marketing site prompt for v0.dev
 
 ```text
-Design and build a premium, conversion-focused marketing website for the “Foco” two-app ecosystem, a private native macOS workspace where everything stays local. The site should make the paid Foco editor feel like a polished, desirable professional Mac app while positioning the free Foco View app as the effortless way for anyone to open and experience a shared workspace. Do not make this look like a generic SaaS template or a Notion clone.
+Design and build a premium, adoption-focused marketing website for the free “Foco” two-app ecosystem, a private native macOS workspace where everything stays local. Both apps are completely free. The site should make the Foco editor feel like a polished, desirable professional Mac app while positioning Foco View as the effortless way for anyone to open and experience a shared workspace. Do not make this look like a generic SaaS template or a Notion clone.
 
 PRODUCT TRUTH
 Foco is a two-app native macOS system for people who want the flexibility of Notion without accounts, servers, tracking, or cloud lock-in:
 
-- “Foco” is the paid creator/editor. It creates and edits `.bulb` workspaces, with pages, Markdown-friendly writing, links, saved AI prompts, PDFs, images, video, audio, and other attachments.
-- “Foco View” is the free companion viewer. Anyone can install it to open, navigate, read, and experience a `.bulb` workspace without buying the editor. Clearly communicate that editing requires the paid Foco app.
+- “Foco” is the free creator/editor. It creates and edits `.bulb` workspaces, with pages, Markdown-friendly writing, links, saved AI prompts, PDFs, images, video, audio, and other attachments.
+- “Foco View” is the free companion viewer. Anyone can install it to open, navigate, read, and experience a `.bulb` workspace. Clearly communicate that editing requires the separate Foco app, but that both apps are free.
 
-Every workspace is one portable `.bulb` file. Move or share the file and the entire workspace moves with it. This creates a powerful distribution loop: creators pay to make polished, self-contained workspaces; recipients can view them for free. Both apps work offline, require no account, and make no network requests. Foco uses the native macOS document system and requires macOS 14 or newer.
+Every workspace is one portable `.bulb` file. Move or share the file and the entire workspace moves with it. This creates a powerful distribution loop: creators make polished, self-contained workspaces in Foco; recipients experience them in Foco View. Both apps are free, work offline, require no account, and make no network requests. Foco uses the native macOS document system and requires macOS 14 or newer.
 
 CORE POSITIONING
 Lead with this idea: “Create in Foco. Share with anyone.”
 Supporting message: “Build a complete private workspace in one portable `.bulb` file. Anyone can open it free with Foco View.”
 Use “Your ideas. One file. Entirely yours.” as a recurring supporting line.
 The emotional promise is calm ownership: no account, no subscription anxiety, no sync spinner, no surveillance, and no wondering where your work lives.
-The commercial promise is equally important: buy the editor to create and edit; share finished `.bulb` workspaces with clients, collaborators, students, or friends who can view them free.
+The adoption promise is equally important: create and edit for free; share finished `.bulb` workspaces with clients, collaborators, students, or friends who can view them free.
 
 TARGET CUSTOMERS
 - Privacy-conscious creators, researchers, writers, designers, developers, consultants, and students
 - People who like Notion-style organization but do not want their knowledge base stored on someone else’s servers
 - Mac users who value beautiful native software, durable files, offline access, and data ownership
 - Professionals building research libraries, client workspaces, creative bibles, personal wikis, and project archives
-- Teams and independent professionals who need to deliver rich, organized project files without requiring every recipient to purchase software
+- Teams and independent professionals who need to deliver rich, organized project files without accounts, subscriptions, or seat licenses
 
 DESIGN DIRECTION
 Create a sophisticated editorial Mac aesthetic: warm, minimal, tactile, and quietly confident. Use a warm ivory background (#F7F6F1), near-black text (#1C1C1A), soft stone surfaces, subtle 1px borders, and a restrained terracotta/coral accent close to #D15C40. Use generous whitespace, crisp typography, delicate shadows, and rounded corners between 14–24px. The visual identity includes a warm bulb/pen mark; represent it with a tasteful abstract bulb icon if the actual asset is unavailable.
@@ -38,7 +38,7 @@ SITE STRUCTURE
 - Left: Foco bulb mark and wordmark
 - Center/right links: Why Foco, Foco View, How it works, Features, Privacy, FAQ
 - Secondary CTA: “Download Foco View — Free”
-- Primary CTA: “Get Foco — Editor”
+- Primary CTA: “Download Foco — Free”
 - Small platform note near CTA: “macOS 14+”
 - On mobile, use a clean accessible menu
 
@@ -46,7 +46,7 @@ SITE STRUCTURE
 Eyebrow: “Create privately. Share freely.”
 Headline: “Create in Foco. Share with anyone.”
 Body: “Build notes, research, media, and project context into one portable `.bulb`. Send the file anywhere—anyone can open it free with Foco View.”
-Primary CTA: “Get Foco — Editor”
+Primary CTA: “Download Foco — Free”
 Secondary CTA: “Download Foco View — Free”
 Tertiary text link: “See how a .bulb works”
 Trust row: “Free viewer” · “No account” · “Works offline” · “No analytics” · “Native macOS”
@@ -71,7 +71,7 @@ Keep the tone confident and factual, not alarmist.
 Headline: “Make it in Foco. Open it free in Foco View.”
 Create a highly legible two-column product presentation:
 
-Foco — Paid editor
+Foco — Free editor
 - Create new `.bulb` workspaces
 - Write, organize, and edit pages
 - Add PDFs, images, video, audio, prompts, and files
@@ -85,7 +85,7 @@ Foco View — Free viewer
 - Designed for clients, collaborators, students, friends, and every recipient
 - CTA: “Download Foco View free”
 
-Between the two product cards, show a `.bulb` file traveling from creator to recipient. Add the line: “Only creators pay. Viewing stays free.” Make the distinction between viewing and editing unmissable without making the free app feel crippled.
+Between the two product cards, show a `.bulb` file traveling from creator to recipient. Add the line: “Free to create. Free to share. Free to view.” Make the distinction between the editor and viewer unmissable while showing that neither requires payment.
 
 5. THE `.BULB` DIFFERENTIATOR
 Headline: “A whole workspace in one file.”
@@ -104,7 +104,7 @@ Use an alternating editorial layout with product UI scenes for:
 - Preview without leaving your work: inline native media and PDF previews, including offline video playback
 - Save prompts beside the work they support: locally stored prompt blocks, without pretending Foco itself is an AI service
 - Trust the save: native macOS autosave and standard document behavior
-- Share without seat licenses: recipients use the free Foco View app, while editing remains a paid Foco capability
+- Share without seat licenses: recipients use Foco View, while creators use the separate free Foco editor
 
 7. USE-CASE CARDS
 Headline: “One calm home for work worth keeping.”
@@ -125,15 +125,15 @@ Add a simple privacy checklist and a visual of a Mac → `.bulb` file → user-c
 9. TESTIMONIAL / SOCIAL PROOF PLACEHOLDERS
 Include a compact testimonial area, but clearly use editable placeholder content such as “[Customer quote]” and “[Name, role]”. Do not invent customer counts, ratings, publications, company logos, or endorsements. Make it easy to replace this section when real proof exists.
 
-10. PRODUCT AND PRICING CTA
-Use two complementary product cards with the paid editor visually primary. Design Foco so it can support a premium one-time purchase, but do not invent a price or licensing terms. Use an editable placeholder: “$[price] one-time”.
-Headline: “Create without limits. Share without friction.”
+10. FREE DOWNLOAD CTA
+Use two complementary product cards with the Foco editor visually primary. Make “Free” prominent on both cards. Do not include pricing, checkout language, trials, subscriptions, license tiers, or purchase UI.
+Headline: “Create for free. Share without friction.”
 
 Primary card — Foco
 Label: “Create + Edit”
-Price: “$[price] one-time”
+Price: “Free”
 Include: native macOS editor, offline use, unlimited local workspaces, all current core editing features, and no account required.
-CTA: “Get Foco — Editor”
+CTA: “Download Foco — Free”
 
 Companion card — Foco View
 Label: “View”
@@ -148,7 +148,8 @@ Do not claim lifetime updates unless supplied later.
 Include accessible accordion answers for:
 - What is a `.bulb` file?
 - What is the difference between Foco and Foco View?
-- Can people view my workspace without buying Foco?
+- Are both Foco apps really free?
+- Can people view my workspace without installing the editor?
 - Can I edit a `.bulb` in Foco View?
 - Does Foco work without internet?
 - Where is my data stored?
@@ -161,7 +162,7 @@ Keep answers grounded in the product truth. Explain that users may place the por
 12. FINAL CTA AND FOOTER
 Headline: “Make something worth sharing.”
 Supporting copy: “Create it privately in Foco. Send one file. Let anyone open it free.”
-Primary CTA: “Get Foco — Editor”
+Primary CTA: “Download Foco — Free”
 Secondary CTA: “Download Foco View — Free”
 Footer links: Product, Privacy, Changelog, Support, Terms
 Add a small line: “Two native Mac apps. One portable format. Your work stays local.”
@@ -181,11 +182,11 @@ IMPLEMENTATION REQUIREMENTS
 - Responsive from 360px mobile through large desktop
 - Excellent accessibility: semantic landmarks, keyboard navigation, visible focus, meaningful labels, strong contrast
 - Aim for Lighthouse-ready performance; avoid heavy libraries and remote assets unless essential
-- Include complete polished copy rather than lorem ipsum, except for explicitly labeled testimonial and pricing placeholders
-- Use separate configurable URL placeholders for the paid Foco purchase and the free Foco View download
-- Add sensible SEO metadata: title, description, Open Graph copy, and product-focused structured data without fabricated ratings or price
-- Make the final result feel launch-ready, highly credible, emotionally resonant, and commercially premium
+- Include complete polished copy rather than lorem ipsum, except for explicitly labeled testimonial placeholders
+- Use separate configurable download URL placeholders for Foco and Foco View
+- Add sensible SEO metadata: title, description, Open Graph copy, and product-focused structured data without fabricated ratings
+- Make the final result feel launch-ready, highly credible, emotionally resonant, and premium
 
 COPY TONE
-Concise, intelligent, reassuring, and specific. Write for discerning Mac users. Sell freedom, permanence, focus, ownership, and frictionless sharing. Consistently distinguish the paid Foco editor from the free Foco View app. Avoid fearmongering, empty superlatives, startup jargon, “revolutionary,” “second brain,” and unsupported claims.
+Concise, intelligent, reassuring, and specific. Write for discerning Mac users. Sell freedom, permanence, focus, ownership, and frictionless sharing. Consistently distinguish the free Foco editor from the free Foco View app. Avoid fearmongering, empty superlatives, startup jargon, “revolutionary,” “second brain,” and unsupported claims.
 ```
