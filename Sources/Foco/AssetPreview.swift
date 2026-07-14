@@ -5,12 +5,12 @@ import UniformTypeIdentifiers
 
 struct AssetPreviewGallery: View {
     let assets: [VaultAsset]
-    let assetData: [String: Data]
+    let assetURL: @Sendable (VaultAsset) -> URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(assets) { asset in
-                AssetPreviewCard(asset: asset, data: assetData[asset.storedFilename])
+                AssetPreviewCard(asset: asset, materialize: { assetURL(asset) })
             }
         }
     }
@@ -18,7 +18,8 @@ struct AssetPreviewGallery: View {
 
 private struct AssetPreviewCard: View {
     let asset: VaultAsset
-    let data: Data?
+    let materialize: @Sendable () -> URL?
+    @State private var localURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,10 +47,10 @@ private struct AssetPreviewCard: View {
 
     @ViewBuilder
     private var preview: some View {
-        if let data {
+        if let localURL {
             switch asset.mediaType.lowercased() {
             case "image":
-                if let image = NSImage(data: data) {
+                if let image = NSImage(contentsOf: localURL) {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -59,21 +60,32 @@ private struct AssetPreviewCard: View {
                     unavailable
                 }
             case "pdf":
-                LocalPDFPreview(data: data)
+                LocalPDFPreview(url: localURL)
                     .frame(height: 420)
             case "video":
-                LocalVideoPreview(data: data, filename: asset.storedFilename)
+                LocalVideoPreview(url: localURL)
                     .frame(height: 390)
                     .background(Color.black)
+            case "audio":
+                LocalVideoPreview(url: localURL, audioOnly: true)
+                    .frame(height: 82)
+                    .background(Color.primary.opacity(0.035))
             default:
-                genericFile(data: data)
+                genericFile
             }
         } else {
-            unavailable
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .frame(height: 150)
+                .task {
+                    let materialize = materialize
+                    localURL = await Task.detached(priority: .utility) { materialize() }.value
+                }
         }
     }
 
-    private func genericFile(data: Data) -> some View {
+    private var genericFile: some View {
         HStack(spacing: 16) {
             Image(systemName: assetIcon)
                 .font(.system(size: 30, weight: .light))
@@ -82,7 +94,7 @@ private struct AssetPreviewCard: View {
                 .background(FocoTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
                 Text(asset.filename).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))
+                Text(ByteCountFormatter.string(fromByteCount: asset.byteSize ?? 0, countStyle: .file))
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -99,6 +111,7 @@ private struct AssetPreviewCard: View {
         switch asset.mediaType.lowercased() {
         case "image": "photo"
         case "video": "play.rectangle"
+        case "audio": "waveform"
         case "pdf": "doc.richtext"
         default: "doc"
         }
@@ -106,7 +119,7 @@ private struct AssetPreviewCard: View {
 }
 
 private struct LocalPDFPreview: NSViewRepresentable {
-    let data: Data
+    let url: URL
 
     func makeNSView(context: Context) -> PDFView {
         let view = PDFView()
@@ -115,28 +128,28 @@ private struct LocalPDFPreview: NSViewRepresentable {
         view.displayDirection = .vertical
         view.displaysPageBreaks = true
         view.backgroundColor = .textBackgroundColor
-        view.document = PDFDocument(data: data)
+        view.document = PDFDocument(url: url)
         return view
     }
 
     func updateNSView(_ view: PDFView, context: Context) {
-        guard view.document?.dataRepresentation() != data else { return }
-        view.document = PDFDocument(data: data)
+        guard view.document?.documentURL != url else { return }
+        view.document = PDFDocument(url: url)
     }
 }
 
 private struct LocalVideoPreview: NSViewRepresentable {
-    let data: Data
-    let filename: String
+    let url: URL
+    var audioOnly = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.controlsStyle = .floating
+        view.controlsStyle = audioOnly ? .inline : .floating
         view.videoGravity = .resizeAspect
-        view.showsFullScreenToggleButton = true
-        view.allowsPictureInPicturePlayback = true
+        view.showsFullScreenToggleButton = !audioOnly
+        view.allowsPictureInPicturePlayback = !audioOnly
         configure(view, coordinator: context.coordinator)
         return view
     }
@@ -151,22 +164,12 @@ private struct LocalVideoPreview: NSViewRepresentable {
     }
 
     private func configure(_ view: AVPlayerView, coordinator: Coordinator) {
-        guard coordinator.loadedFilename != filename else { return }
-        do {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("FocoPreviews", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(filename)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                try data.write(to: url, options: .atomic)
-            }
-            view.player = AVPlayer(url: url)
-            coordinator.loadedFilename = filename
-        } catch {
-            view.player = nil
-        }
+        guard coordinator.loadedURL != url else { return }
+        view.player = AVPlayer(url: url)
+        coordinator.loadedURL = url
     }
 
     final class Coordinator {
-        var loadedFilename: String?
+        var loadedURL: URL?
     }
 }

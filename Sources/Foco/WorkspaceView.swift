@@ -2,17 +2,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct WorkspaceView: View {
-    @Binding var document: VaultDocument
+    @ObservedObject var document: VaultDocument
+    let fileURL: URL?
     @State private var selectedPageID: VaultPage.ID?
     @State private var showingImporter = false
     @State private var pendingKind: InsertKind?
     @State private var sidebarVisible = true
+    @State private var isDropTargeted = false
 
     var body: some View {
         HStack(spacing: 0) {
             if sidebarVisible {
                 VaultSidebar(
-                    title: $document.manifest.title,
+                    title: Binding(get: { document.manifest.title }, set: document.renameDocument),
                     pages: document.manifest.pages,
                     selectedPageID: $selectedPageID,
                     addPage: addPage,
@@ -25,14 +27,17 @@ struct WorkspaceView: View {
             VStack(spacing: 0) {
                 topBar
                 Divider().overlay(FocoTheme.hairline)
-                if let index = selectedIndex {
+                if document.currentPage != nil {
                     EditorView(
-                        page: $document.manifest.pages[index],
-                        assets: document.manifest.assets,
-                        assetData: document.assetData,
+                        page: Binding(
+                            get: { document.currentPage ?? VaultPage(title: "Untitled", content: "") },
+                            set: document.updateCurrentPage
+                        ),
+                        assets: document.currentAssets,
+                        assetURL: document.materialize,
                         onInsertAsset: requestAsset
                     )
-                        .id(document.manifest.pages[index].id)
+                        .id(document.currentPage?.id)
                 } else {
                     ContentUnavailableView("Choose a page", systemImage: "doc.text")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,14 +47,33 @@ struct WorkspaceView: View {
         }
         .frame(minWidth: 900, minHeight: 620)
         .animation(.easeInOut(duration: 0.18), value: sidebarVisible)
-        .onAppear { selectedPageID = selectedPageID ?? document.manifest.pages.first?.id }
+        .overlay {
+            if isDropTargeted {
+                DropFilesOverlay()
+                    .padding(18)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            }
+        }
+        .dropDestination(
+            for: URL.self,
+            action: { urls, _ in importDroppedFiles(urls) },
+            isTargeted: { isDropTargeted = $0 }
+        )
+        .onAppear {
+            document.adoptFileURL(fileURL)
+            selectedPageID = selectedPageID ?? document.manifest.pages.first?.id
+            document.selectPage(selectedPageID)
+        }
+        .onChange(of: fileURL) { _, newURL in
+            document.adoptFileURL(newURL)
+            selectedPageID = document.manifest.pages.first?.id
+            document.selectPage(selectedPageID)
+        }
+        .onChange(of: selectedPageID) { _, pageID in document.selectPage(pageID) }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: allowedTypes) { result in
             guard case .success(let url) = result, let kind = pendingKind else { return }
-            do {
-                let asset = try document.importAsset(from: url, mediaType: kind.label)
-                attach(asset)
-            } catch { NSApp.presentError(error) }
             pendingKind = nil
+            importFile(url, as: kind == .file ? InsertKind.detected(for: url) : kind)
         }
     }
 
@@ -82,36 +106,68 @@ struct WorkspaceView: View {
     }
 
     private var currentPageTitle: String {
-        guard let index = selectedIndex else { return "Foco" }
-        let title = document.manifest.pages[index].title
+        guard let page = document.currentPage else { return "Foco" }
+        let title = page.title
         return title.isEmpty ? "Untitled" : title
     }
-    private var selectedIndex: Int? { document.manifest.pages.firstIndex { $0.id == selectedPageID } }
     private var allowedTypes: [UTType] {
         switch pendingKind {
         case .pdf: [.pdf]
         case .image: [.image]
         case .video: [.movie, .video]
+        case .audio: [.audio]
         default: [.data]
         }
     }
     private func addPage() {
-        let page = VaultPage(title: "Untitled", content: "")
-        document.manifest.pages.append(page)
+        let page = document.addPage()
         selectedPageID = page.id
     }
     private func delete(_ page: VaultPage) {
-        guard document.manifest.pages.count > 1 else { return }
-        document.manifest.pages.removeAll { $0.id == page.id }
+        document.deletePage(page)
         selectedPageID = document.manifest.pages.first?.id
     }
     private func requestAsset(_ kind: InsertKind) { pendingKind = kind; showingImporter = true }
-    private func attach(_ asset: VaultAsset) {
-        guard let index = selectedIndex else { return }
-        if document.manifest.pages[index].assetIDs == nil {
-            document.manifest.pages[index].assetIDs = []
+    private func importDroppedFiles(_ urls: [URL]) -> Bool {
+        let files = urls.filter { url in
+            guard url.isFileURL else { return false }
+            return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
         }
-        document.manifest.pages[index].assetIDs?.append(asset.id)
+        guard !files.isEmpty, document.currentPage != nil else { return false }
+        for file in files { importFile(file, as: InsertKind.detected(for: file)) }
+        return true
+    }
+
+    private func importFile(_ url: URL, as kind: InsertKind) {
+        Task {
+            do {
+                _ = try await document.importAsset(from: url, mediaType: kind.label)
+            } catch {
+                NSApp.presentError(error)
+            }
+        }
+    }
+}
+
+private struct DropFilesOverlay: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "arrow.down.doc.fill")
+                .font(.system(size: 28, weight: .medium))
+            Text("Drop files to add them")
+                .font(.system(size: 15, weight: .semibold))
+            Text("Images, PDFs, video, and audio are detected automatically")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(FocoTheme.accent, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+        }
+        .allowsHitTesting(false)
     }
 }
 

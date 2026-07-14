@@ -8,14 +8,19 @@ struct FocoApp: App {
         // Swift Package executables do not always promote themselves to a normal
         // foreground app. Make the editor own keyboard focus when run from Terminal.
         NSApplication.shared.setActivationPolicy(.regular)
+        if let iconURL = FocoResources.url(forResource: "BulbIcon", withExtension: "png"),
+           let icon = NSImage(contentsOf: iconURL) {
+            icon.isTemplate = false
+            NSApplication.shared.applicationIconImage = icon
+        }
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
 
     var body: some Scene {
-        DocumentGroup(newDocument: VaultDocument()) { file in
-            WorkspaceView(document: file.$document)
+        DocumentGroup(newDocument: { VaultDocument() }) { file in
+            WorkspaceView(document: file.document, fileURL: file.fileURL)
         }
         .commands {
             SidebarCommands()
@@ -26,6 +31,6 @@ struct FocoApp: App {
 extension UTType {
     /// Defining the type from its extension gives the save panel a concrete,
     /// preferred filename suffix even when Foco is run from Swift Package Manager.
-    static let focoBulb = UTType(filenameExtension: "bulb", conformingTo: .package)!
+    static let focoBulb = UTType("app.foco.bulb") ?? UTType(filenameExtension: "bulb", conformingTo: .data)!
     static let focoVaultLegacy = UTType(filenameExtension: "vault", conformingTo: .package)!
 }

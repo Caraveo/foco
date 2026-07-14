@@ -4,34 +4,41 @@ Foco is a native macOS, document-based workspace inspired by Notion, with one im
 
 Every workspace is saved as a transferable `.bulb` document (for example, `Research.bulb`). A bulb contains its pages, writing, links, prompts, PDFs, videos, images, and other attachments. There is no account, server, sync engine, analytics SDK, or required internet connection.
 
-## First milestone
+## What works today
 
-This repository contains the first usable slice:
+This repository contains a working local-first prototype:
 
 - Native SwiftUI macOS document app
 - Create, open, and save `.bulb` documents
 - Page hierarchy in the left sidebar
-- Markdown-friendly document editor
-- Type `/` to open the insert menu
-- Insert headings, prompts, links, PDFs, videos, images, and files
+- Markdown-friendly document editor that starts at the top of the page
+- Cursor-anchored `/` menu with keyboard filtering and selection
+- Insert headings, prompts, links, tables, Kanban boards, calendars, lists, galleries, timelines, PDFs, videos, audio, images, and files
+- Rendered dividers, tables, code blocks, quotes, prompts, and automatic clickable `http://` and `https://` links
+- Automatic continuation for bulleted lists, numbered lists, checklists, quotes, and table rows
 - Assets are copied into the `.bulb`, so the document remains portable
-- Images, PDFs, and videos are previewed directly on the page
-- Videos use native playback controls and work completely offline
+- Images and PDFs are previewed directly on the page
+- Video and audio use native playback controls and work completely offline
+- Drag files from Finder onto a page with automatic PDF, image, video, and audio detection
 - Automatic local saves through the macOS document system
 
-## How a vault works
+## How a bulb works
 
-A `.bulb` is a macOS package: it behaves like one document in Finder but internally uses a small, durable folder structure.
+A `.bulb` is a real single file, not a Finder package or disguised folder. Internally it is a ZIP-compatible archive containing ordinary files.
 
 ```text
-Project.bulb/
-├── document.json
+Project.bulb
+├── manifest.json
+├── Pages/
+│   └── <page-id>.md
 └── Assets/
     ├── <asset-id>-brief.pdf
     └── <asset-id>-demo.mov
 ```
 
-`document.json` stores pages and metadata. Binary files stay as binary files in `Assets`, rather than being embedded into JSON. This keeps large workspaces practical and makes the format inspectable and recoverable.
+Foco loads only `manifest.json` at open. It reads only the selected Markdown page and extracts an asset only when its preview appears. Videos, audio, PDFs, and images remain real files inside the archive and are never loaded into one large in-memory value.
+
+Page text and metadata use normal ZIP compression. Media is stored without recompression because PDFs, images, audio, and videos are normally compressed already; recompressing would waste time or reduce quality.
 
 ## Run
 
@@ -41,14 +48,25 @@ Open `Package.swift` in Xcode and run the `Foco` scheme, or use:
 swift run Foco
 ```
 
+To install a development app bundle and register `.bulb` with Finder:
+
+```bash
+./Scripts/install-dev-app.sh
+open ~/Applications/Foco.app
+```
+
+The installer creates a signed local app bundle, declares `app.foco.bulb` as an editable document type, and registers Foco as its owner with Launch Services. Running the raw SwiftPM executable alone cannot register a macOS document extension.
+
 The app requires macOS 14 or newer.
 
 ## Editing
 
 - Choose a page in the sidebar.
 - Write plain text or Markdown.
-- Type `/` to open the block menu. Continue typing to filter it, then click a type to insert it.
-- Attachments are page blocks backed by local files inside the vault. Images and PDFs render inline, videos have native playback controls, and other files show a local attachment card.
+- Type `/` to open the block menu directly beneath the cursor. Continue typing to filter it, use ↑/↓ to move, Return to insert, or Escape to close it. Mouse selection also works.
+- Paste or type an `http://` or `https://` address to create a clickable link automatically.
+- Drag one or several files anywhere over the workspace to attach them to the selected page; Foco detects their type from macOS metadata and filename extension.
+- Attachments are real files inside the bulb archive. Images and PDFs render inline, video and audio have native playback controls, and other files show a local attachment card.
 
 ## Product principles
 
@@ -60,13 +78,28 @@ The app requires macOS 14 or newer.
 
 ## Next sensible steps
 
-- Rich inline rendering for images, PDFs, and videos
-- Drag-and-drop attachments
 - Nested pages and sidebar reordering
 - Search across a vault
 - Backlinks and local graph
 - Export to Markdown/PDF
 - Optional user-owned sync via iCloud Drive, Dropbox, or any folder provider
+
+## Development checks
+
+Build the app:
+
+```bash
+swift build -j 1
+```
+
+Verify that `.bulb` remains one ZIP-compatible file with ordinary page and media entries:
+
+```bash
+swiftc -parse-as-library Sources/Foco/VaultDocument.swift Tools/StorageSmoke.swift \
+  -o /tmp/foco-storage-smoke \
+  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers
+/tmp/foco-storage-smoke
+```
 
 ## Privacy
 
