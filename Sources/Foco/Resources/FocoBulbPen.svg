@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foco bulb and pen icon</title>
+  <desc id="desc">A minimal white light bulb and pen on a warm coral rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="160" y1="96" x2="864" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E16B54"/>
+      <stop offset="1" stop-color="#B84736"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#background)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="70" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M438 217C230 217 192 430 293 554c25 30 34 52 39 85h166c8-36 21-58 43-88"/>
+    <path d="M337 716h145M362 793h90"/>
+  </g>
+  <path d="M466 598 720 260c24-32 83 13 59 45L525 643l-76 27 17-72Z" fill="#FFFFFF"/>
+</svg>
