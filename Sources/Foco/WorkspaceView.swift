@@ -18,7 +18,7 @@ struct WorkspaceView: View {
                     title: Binding(get: { document.manifest.title }, set: document.renameDocument),
                     pages: document.manifest.pages,
                     selectedPageID: $selectedPageID,
-                    addPage: addPage,
+                    addPage: { category in addPage(category: category) },
                     deletePage: delete
                 )
                 .frame(width: 248)
@@ -37,6 +37,18 @@ struct WorkspaceView: View {
                         assets: document.currentAssets,
                         assetURL: document.materialize,
                         onInsertAsset: requestAsset,
+                        onImportEmbeddedAsset: { url in
+                            do {
+                                return try await document.importAsset(
+                                    from: url,
+                                    mediaType: InsertKind.image.label,
+                                    insertBlockToken: false
+                                )
+                            } catch {
+                                NSApp.presentError(error)
+                                return nil
+                            }
+                        },
                         onDeleteAsset: document.deleteAsset
                     )
                         .id(document.currentPage?.id)
@@ -96,17 +108,7 @@ struct WorkspaceView: View {
             Text(currentPageTitle)
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text("Private")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
             Spacer()
-            Text("Saved locally")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-            FocoIconButton(icon: "ellipsis", help: "More")
         }
         .padding(.horizontal, 12)
         .frame(height: 45)
@@ -127,8 +129,8 @@ struct WorkspaceView: View {
         default: [.data]
         }
     }
-    private func addPage() {
-        let page = document.addPage()
+    private func addPage(category: String? = nil) {
+        let page = document.addPage(category: category)
         selectedPageID = page.id
     }
     private func delete(_ page: VaultPage) {
@@ -191,8 +193,28 @@ private struct VaultSidebar: View {
     @Binding var title: String
     let pages: [VaultPage]
     @Binding var selectedPageID: VaultPage.ID?
-    let addPage: () -> Void
+    let addPage: (String?) -> Void
     let deletePage: (VaultPage) -> Void
+
+    private var categories: [String] {
+        var cats = Set<String>()
+        for page in pages {
+            let cat = page.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            cats.insert(cat.isEmpty ? "General" : cat)
+        }
+        if cats.isEmpty {
+            cats.insert("General")
+        }
+        return cats.sorted()
+    }
+
+    private func pages(for category: String) -> [VaultPage] {
+        pages.filter { page in
+            let cat = page.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let mappedCat = cat.isEmpty ? "General" : cat
+            return mappedCat.localizedCaseInsensitiveCompare(category) == .orderedSame
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -201,49 +223,42 @@ private struct VaultSidebar: View {
                 TextField("Vault name", text: $title)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, weight: .semibold))
-                FocoIconButton(icon: "square.and.pencil", help: "New page", action: addPage)
+                FocoIconButton(icon: "square.and.pencil", help: "New page", action: { addPage(nil) })
             }
             .padding(.horizontal, 10)
             .frame(height: 48)
 
-            VStack(spacing: 1) {
-                SidebarAction(icon: "magnifyingglass", title: "Search", shortcut: "⌘K")
-                SidebarAction(icon: "clock.arrow.circlepath", title: "Updates")
-            }
-            .padding(.horizontal, 7)
-
-            HStack {
-                Text("PRIVATE")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.5)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                FocoIconButton(icon: "plus", help: "New page", action: addPage)
-            }
-            .padding(.leading, 13)
-            .padding(.trailing, 8)
-            .padding(.top, 22)
-            .padding(.bottom, 5)
-
             ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(pages) { page in
-                        SidebarPageRow(
-                            page: page,
-                            selected: selectedPageID == page.id,
-                            select: { selectedPageID = page.id },
-                            delete: { deletePage(page) }
-                        )
+                LazyVStack(spacing: 16) {
+                    ForEach(categories, id: \.self) { category in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(category.uppercased())
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .tracking(0.5)
+                                    .foregroundStyle(.tertiary)
+                                Spacer()
+                                FocoIconButton(icon: "plus", help: "New page in \(category)") {
+                                    addPage(category)
+                                }
+                            }
+                            .padding(.leading, 6)
+                            .padding(.trailing, 1)
+
+                            ForEach(pages(for: category)) { page in
+                                SidebarPageRow(
+                                    page: page,
+                                    selected: selectedPageID == page.id,
+                                    select: { selectedPageID = page.id },
+                                    delete: { deletePage(page) }
+                                )
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 7)
+                .padding(.top, 12)
             }
-
-            VStack(spacing: 1) {
-                SidebarAction(icon: "tray.full", title: "All attachments")
-                SidebarAction(icon: "gearshape", title: "Settings")
-            }
-            .padding(7)
         }
         .background(FocoTheme.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(FocoTheme.hairline).frame(width: 1) }

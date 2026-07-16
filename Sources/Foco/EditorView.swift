@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum InsertKind: String, CaseIterable, Identifiable {
-    case text, heading1, heading2, bulletedList, numberedList, todo, quote, divider, code, prompt, url
+    case text, heading1, heading2, bulletedList, numberedList, todo, quote, divider, code, formula, prompt, url
     case table, board, calendar, listView, gallery, timeline
     case pdf, image, video, audio, file
 
@@ -19,6 +19,7 @@ enum InsertKind: String, CaseIterable, Identifiable {
         case .quote: "Quote"
         case .divider: "Divider"
         case .code: "Code"
+        case .formula: "Formula"
         case .prompt: "Prompt"
         case .url: "Web link"
         case .table: "Table"
@@ -45,6 +46,7 @@ enum InsertKind: String, CaseIterable, Identifiable {
         case .quote: "Capture a quotation"
         case .divider: "Visually divide your page"
         case .code: "Add a code block"
+        case .formula: "Write a LaTeX equation"
         case .prompt: "Save an AI prompt locally"
         case .url: "Bookmark a website"
         case .table: "Organize information in rows"
@@ -70,6 +72,7 @@ enum InsertKind: String, CaseIterable, Identifiable {
         case .quote: "quote.opening"
         case .divider: "minus"
         case .code: "chevron.left.forwardslash.chevron.right"
+        case .formula: "function"
         case .prompt: "sparkles"
         case .url: "link"
         case .table: "tablecells"
@@ -88,6 +91,17 @@ enum InsertKind: String, CaseIterable, Identifiable {
     var needsFile: Bool { [.pdf, .image, .video, .audio, .file].contains(self) }
     var isView: Bool { [.table, .board, .calendar, .listView, .gallery, .timeline].contains(self) }
     var isMedia: Bool { needsFile }
+    var structuredKind: FocoStructuredBlockKind? {
+        switch self {
+        case .table: .table
+        case .board: .board
+        case .calendar: .calendar
+        case .listView: .list
+        case .gallery: .gallery
+        case .timeline: .timeline
+        default: nil
+        }
+    }
 
     static func matches(_ query: String) -> [InsertKind] {
         query.isEmpty ? allCases : allCases.filter {
@@ -118,30 +132,20 @@ struct EditorView: View {
     let assets: [VaultAsset]
     let assetURL: @Sendable (VaultAsset) -> URL?
     let onInsertAsset: (InsertKind, Int) -> Void
+    let onImportEmbeddedAsset: @MainActor (URL) async -> VaultAsset?
     let onDeleteAsset: (VaultAsset) -> Void
     @State private var slashQuery: String?
-    @State private var slashAnchor = CGPoint.zero
-    @State private var editorFrame = CGRect.zero
     @State private var selectedRange = NSRange(location: 0, length: 0)
     @State private var slashSelection = 0
     @State private var editorHeight: CGFloat = 180
 
     var body: some View {
-        GeometryReader { geometry in
-          ZStack(alignment: .topLeading) {
+        GeometryReader { _ in
+          ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         Spacer().frame(height: 34)
-                        HStack {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 30, weight: .light))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 52, height: 52)
-                                .background(FocoTheme.hover, in: RoundedRectangle(cornerRadius: 12))
-                            Spacer()
-                        }
-                        .padding(.bottom, 18)
 
                         TextField("Untitled", text: $page.title)
                             .textFieldStyle(.plain)
@@ -149,10 +153,29 @@ struct EditorView: View {
                             .tracking(-1.1)
                             .padding(.bottom, 8)
 
-                        Text("Private  ·  Saved in this vault")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .padding(.bottom, 25)
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                            Text("Category:")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                            TextField("General", text: Binding(
+                                get: { page.category ?? "" },
+                                set: { page.category = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                            ))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(width: 150)
+                            
+                            Spacer()
+                            
+                            Text("Saved in this vault")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.bottom, 25)
 
                         ZStack(alignment: .topLeading) {
                             if page.content.isEmpty {
@@ -165,12 +188,21 @@ struct EditorView: View {
                             RichTextEditor(
                                 text: $page.content,
                                 slashQuery: $slashQuery,
-                                slashAnchor: $slashAnchor,
                                 selectedRange: $selectedRange,
                                 editorHeight: $editorHeight,
                                 assets: referencedAssets,
+                                blocks: page.blocks ?? [],
                                 assetURL: assetURL,
+                                onImportEmbeddedAsset: onImportEmbeddedAsset,
                                 onDeleteAsset: deleteAsset,
+                                onUpdateStructuredBlock: updateStructuredBlock,
+                                onDeleteStructuredBlock: deleteStructuredBlock,
+                                onMoveStructuredBlock: { blockID, offset in
+                                    moveStructuredBlock(blockID, toUTF16Offset: offset)
+                                },
+                                onMoveStructuredBlockBy: { blockID, direction in
+                                    moveStructuredBlock(blockID, by: direction)
+                                },
                                 onMoveAsset: { assetID, offset in
                                     moveAsset(assetID, toUTF16Offset: offset)
                                 },
@@ -180,14 +212,6 @@ struct EditorView: View {
                                 onSlashKey: handleSlashKey
                             )
                                 .frame(height: editorHeight)
-                                .background {
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: EditorFramePreferenceKey.self,
-                                            value: proxy.frame(in: .named("EditorRoot"))
-                                        )
-                                    }
-                                }
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -202,20 +226,19 @@ struct EditorView: View {
 
             if let query = slashQuery {
                 SlashMenu(query: query, selectedIndex: $slashSelection, insert: insert)
-                    .offset(
-                        x: min(max(12, editorFrame.minX + slashAnchor.x), max(12, geometry.size.width - 338)),
-                        y: min(editorFrame.minY + slashAnchor.y + 7, max(12, geometry.size.height - 455))
+                    .padding(.bottom, 28)
+                    .transition(
+                        .opacity
+                            .combined(with: .move(edge: .bottom))
+                            .combined(with: .scale(scale: 0.96, anchor: .bottom))
                     )
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
                     .zIndex(10)
             }
           }
         }
-        .coordinateSpace(name: "EditorRoot")
-        .onPreferenceChange(EditorFramePreferenceKey.self) { editorFrame = $0 }
         .background(FocoTheme.canvas)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.easeOut(duration: 0.12), value: slashQuery != nil)
+        .animation(.spring(response: 0.22, dampingFraction: 0.88), value: slashQuery != nil)
         .onChange(of: slashQuery) { _, _ in slashSelection = 0 }
     }
 
@@ -240,6 +263,21 @@ struct EditorView: View {
             onInsertAsset(kind, insertionLocation)
             return
         }
+        if let structuredKind = kind.structuredKind {
+            let block = FocoStructuredBlock(kind: structuredKind)
+            var blocks = page.blocks ?? []
+            blocks.append(block)
+            page.blocks = blocks
+            page.blockIDs = blocks.map(\.id)
+            let result = FocoStructuredBlockSyntax.inserting(
+                block,
+                into: page.content,
+                replacing: replacementRange
+            )
+            page.content = result.content
+            selectedRange = NSRange(location: result.cursor, length: 0)
+            return
+        }
         let value: String
         switch kind {
         case .text: value = ""
@@ -251,14 +289,10 @@ struct EditorView: View {
         case .quote: value = "> "
         case .divider: value = "---\n"
         case .code: value = "```\nCode\n```"
+        case .formula: value = "$$\nE = mc^2\n$$"
         case .prompt: value = "> Prompt: "
         case .url: value = "https://"
-        case .table: value = "Name\tStatus\tNotes\nItem\tNot started\t\n"
-        case .board: value = "## Board\n\n### To do\n☐ New task\n\n### In progress\n\n### Done\n"
-        case .calendar: value = "## Calendar\n\n📅 YYYY-MM-DD — Event\n"
-        case .listView: value = "• Item\n"
-        case .gallery: value = "## Gallery\n\nDrop images here or type /image\n"
-        case .timeline: value = "## Timeline\n\n● YYYY-MM-DD — Milestone\n"
+        case .table, .board, .calendar, .listView, .gallery, .timeline: return
         default: return
         }
         page.content = (page.content as NSString).replacingCharacters(in: replacementRange, with: value)
@@ -269,6 +303,28 @@ struct EditorView: View {
         guard let asset = assets.first(where: { $0.id == assetID }) else { return }
         page.content = AssetBlockSyntax.removing(assetID, from: page.content)
         onDeleteAsset(asset)
+    }
+
+    private func updateStructuredBlock(_ block: FocoStructuredBlock) {
+        var blocks = page.blocks ?? []
+        if let index = blocks.firstIndex(where: { $0.id == block.id }) {
+            blocks[index] = block
+        } else {
+            blocks.append(block)
+        }
+        page.blocks = blocks
+        page.blockIDs = blocks.map(\.id)
+    }
+
+    /// The text view has already removed the fixed ordering token when this is
+    /// called. Remove the separate JSON model and any gallery-owned media.
+    private func deleteStructuredBlock(_ block: FocoStructuredBlock) {
+        page.blocks?.removeAll { $0.id == block.id }
+        page.blockIDs = page.blocks?.map(\.id) ?? []
+        for assetID in block.referencedAssetIDs {
+            guard let asset = assets.first(where: { $0.id == assetID }) else { continue }
+            onDeleteAsset(asset)
+        }
     }
 
     private func moveAsset(_ assetID: UUID, by direction: Int) {
@@ -313,6 +369,48 @@ struct EditorView: View {
         page.content = lines.joined(separator: "\n")
     }
 
+    private func moveStructuredBlock(_ blockID: UUID, by direction: Int) {
+        var lines = page.content.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(where: { line in
+            FocoStructuredBlockSyntax.matches(in: line).contains { $0.id == blockID }
+        }) else { return }
+
+        if direction < 0 {
+            var target = index - 1
+            while target >= 0 && lines[target].trimmingCharacters(in: .whitespaces).isEmpty { target -= 1 }
+            guard target >= 0 else { return }
+            let block = lines.remove(at: index)
+            lines.insert(block, at: target)
+        } else {
+            var target = index + 1
+            while target < lines.count && lines[target].trimmingCharacters(in: .whitespaces).isEmpty { target += 1 }
+            guard target < lines.count else { return }
+            let block = lines.remove(at: index)
+            let adjustedTarget = target > index ? target - 1 : target
+            lines.insert(block, at: min(lines.count, adjustedTarget + 1))
+        }
+        page.content = lines.joined(separator: "\n")
+    }
+
+    private func moveStructuredBlock(_ blockID: UUID, toUTF16Offset offset: Int) {
+        var lines = page.content.components(separatedBy: "\n")
+        guard let sourceIndex = lines.firstIndex(where: { line in
+            FocoStructuredBlockSyntax.matches(in: line).contains { $0.id == blockID }
+        }) else { return }
+
+        let source = page.content as NSString
+        let safeOffset = min(max(0, offset), source.length)
+        let prefix = source.substring(to: safeOffset)
+        var targetIndex = prefix.reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        let block = lines.remove(at: sourceIndex)
+        if sourceIndex < targetIndex { targetIndex -= 1 }
+        targetIndex = min(max(0, targetIndex), lines.count)
+        lines.insert(block, at: targetIndex)
+        page.content = lines.joined(separator: "\n")
+    }
+
     private func handleSlashKey(_ key: SlashKey) {
         guard let query = slashQuery else { return }
         let matches = InsertKind.matches(query)
@@ -330,11 +428,6 @@ struct EditorView: View {
             insert(matches[slashSelection])
         }
     }
-}
-
-private struct EditorFramePreferenceKey: PreferenceKey {
-    static let defaultValue = CGRect.zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 private struct SlashMenu: View {
@@ -453,8 +546,14 @@ private final class FocoTextView: NSTextView {
     var onDeleteAsset: ((UUID) -> Void)?
     var onMoveAsset: ((UUID, Int) -> Void)?
     var onMoveAssetBy: ((UUID, Int) -> Void)?
+    var onUpdateStructuredBlock: ((FocoStructuredBlock) -> Void)?
+    var onDeleteStructuredBlock: ((FocoStructuredBlock) -> Void)?
+    var onMoveStructuredBlock: ((UUID, Int) -> Void)?
+    var onMoveStructuredBlockBy: ((UUID, Int) -> Void)?
     private var inlineAssetViews: [UUID: NSHostingView<AnyView>] = [:]
     private var inlineAssets: [UUID: VaultAsset] = [:]
+    private var inlineBlockViews: [UUID: NSHostingView<AnyView>] = [:]
+    private var inlineBlockStores: [UUID: FocoStructuredBlockStore] = [:]
     private var dragInsertionIndex: Int?
 
     func configureInlineAssets(
@@ -489,6 +588,51 @@ private final class FocoTextView: NSTextView {
         needsLayout = true
     }
 
+    func configureInlineStructuredBlocks(
+        _ blocks: [FocoStructuredBlock],
+        assets: [VaultAsset],
+        assetURL: @escaping @Sendable (VaultAsset) -> URL?,
+        importImage: @escaping @MainActor (URL) async -> VaultAsset?
+    ) {
+        let desiredIDs = Set(blocks.map(\.id))
+        let staleIDs = inlineBlockViews.keys.filter { !desiredIDs.contains($0) }
+        for id in staleIDs {
+            inlineBlockViews[id]?.removeFromSuperview()
+            inlineBlockViews[id] = nil
+            inlineBlockStores[id] = nil
+        }
+
+        for block in blocks {
+            if let store = inlineBlockStores[block.id] {
+                store.configure(
+                    block: block,
+                    assets: assets,
+                    materialize: assetURL,
+                    importImage: importImage
+                )
+                continue
+            }
+
+            let store = FocoStructuredBlockStore(
+                block: block,
+                assets: assets,
+                materialize: assetURL,
+                importImage: importImage,
+                onChange: { [weak self] updated in self?.onUpdateStructuredBlock?(updated) },
+                onDeleteBlock: { [weak self] id in self?.deleteStructuredBlock(id) },
+                onMoveBlock: { [weak self] id, direction in self?.onMoveStructuredBlockBy?(id, direction) },
+                onDeleteAsset: { [weak self] id in self?.onDeleteAsset?(id) }
+            )
+            let hostedView = NSHostingView(rootView: AnyView(FocoStructuredBlockEditor(store: store)))
+            hostedView.wantsLayer = true
+            hostedView.layer?.cornerRadius = 12
+            addSubview(hostedView)
+            inlineBlockStores[block.id] = store
+            inlineBlockViews[block.id] = hostedView
+        }
+        needsLayout = true
+    }
+
     override func keyDown(with event: NSEvent) {
         if slashMenuVisible?() == true {
             let key: SlashKey?
@@ -516,36 +660,47 @@ private final class FocoTextView: NSTextView {
     }
 
     override func deleteBackward(_ sender: Any?) {
+        guard !deleteAdjacentStructuredBlock(backward: true) else { return }
         guard !deleteAdjacentAsset(backward: true) else { return }
         super.deleteBackward(sender)
     }
 
     override func deleteForward(_ sender: Any?) {
+        guard !deleteAdjacentStructuredBlock(backward: false) else { return }
         guard !deleteAdjacentAsset(backward: false) else { return }
         super.deleteForward(sender)
     }
 
     override func cut(_ sender: Any?) {
         let matches = assetMatches(intersecting: selectedRange())
-        if !matches.isEmpty {
-            setSelectedRange(expandedSelection(selectedRange(), for: matches))
+        let blockMatches = structuredMatches(intersecting: selectedRange())
+        let removedBlocks = blockMatches.compactMap { inlineBlockStores[$0.id]?.block }
+        if !matches.isEmpty || !blockMatches.isEmpty {
+            let ranges = matches.map(\.lineRange) + blockMatches.map(\.lineRange)
+            setSelectedRange(ranges.reduce(selectedRange(), NSUnionRange))
         }
         super.cut(sender)
         matches.forEach { onDeleteAsset?($0.assetID) }
+        removedBlocks.forEach { onDeleteStructuredBlock?($0) }
     }
 
     override func paste(_ sender: Any?) {
         let matches = assetMatches(intersecting: selectedRange())
-        if !matches.isEmpty {
-            setSelectedRange(expandedSelection(selectedRange(), for: matches))
+        let blockMatches = structuredMatches(intersecting: selectedRange())
+        let removedBlocks = blockMatches.compactMap { inlineBlockStores[$0.id]?.block }
+        if !matches.isEmpty || !blockMatches.isEmpty {
+            let ranges = matches.map(\.lineRange) + blockMatches.map(\.lineRange)
+            setSelectedRange(ranges.reduce(selectedRange(), NSUnionRange))
         }
         super.paste(sender)
         matches.forEach { onDeleteAsset?($0.assetID) }
+        removedBlocks.forEach { onDeleteStructuredBlock?($0) }
     }
 
     override func layout() {
         super.layout()
         layoutInlineAssetViews()
+        layoutInlineStructuredBlockViews()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -555,11 +710,15 @@ private final class FocoTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        draggedAssetID(from: sender) == nil ? super.draggingEntered(sender) : .move
+        draggedAssetID(from: sender) == nil && draggedStructuredBlockID(from: sender) == nil
+            ? super.draggingEntered(sender)
+            : .move
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard draggedAssetID(from: sender) != nil else { return super.draggingUpdated(sender) }
+        guard draggedAssetID(from: sender) != nil || draggedStructuredBlockID(from: sender) != nil else {
+            return super.draggingUpdated(sender)
+        }
         let point = convert(sender.draggingLocation, from: nil)
         dragInsertionIndex = characterIndexForInsertion(at: point)
         needsDisplay = true
@@ -573,13 +732,39 @@ private final class FocoTextView: NSTextView {
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard let assetID = draggedAssetID(from: sender) else { return super.performDragOperation(sender) }
         let point = convert(sender.draggingLocation, from: nil)
         let index = characterIndexForInsertion(at: point)
         dragInsertionIndex = nil
         needsDisplay = true
-        onMoveAsset?(assetID, index)
-        return true
+        if let assetID = draggedAssetID(from: sender) {
+            onMoveAsset?(assetID, index)
+            return true
+        }
+        if let blockID = draggedStructuredBlockID(from: sender) {
+            onMoveStructuredBlock?(blockID, index)
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        let source = string as NSString
+        guard index <= source.length else { super.mouseDown(with: event); return }
+        let lineRange = source.lineRange(for: NSRange(location: min(index, max(0, source.length - 1)), length: 0))
+        let line = source.substring(with: lineRange)
+        if (line.hasPrefix("☐ ") || line.hasPrefix("☑ ")),
+           point.x <= textContainerOrigin.x + 28,
+           shouldChangeText(in: NSRange(location: lineRange.location, length: 1), replacementString: nil) {
+            textStorage?.replaceCharacters(
+                in: NSRange(location: lineRange.location, length: 1),
+                with: line.hasPrefix("☐") ? "☑" : "☐"
+            )
+            didChangeText()
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     private func deleteAdjacentAsset(backward: Bool) -> Bool {
@@ -607,8 +792,48 @@ private final class FocoTextView: NSTextView {
         return true
     }
 
+    private func deleteAdjacentStructuredBlock(backward: Bool) -> Bool {
+        let selection = selectedRange()
+        var matches = structuredMatches(intersecting: selection)
+        if matches.isEmpty && selection.length == 0 {
+            let cursor = selection.location
+            matches = FocoStructuredBlockSyntax.matches(in: string).filter { match in
+                let start = match.lineRange.location
+                let end = NSMaxRange(match.lineRange)
+                if cursor >= start && cursor <= end { return true }
+                return backward ? end == cursor : start == cursor
+            }
+            if matches.count > 1 { matches = [backward ? matches.last! : matches.first!] }
+        }
+        guard !matches.isEmpty else { return false }
+        let range = matches.map(\.lineRange).reduce(selection, NSUnionRange)
+        let blocks = matches.compactMap { inlineBlockStores[$0.id]?.block }
+        guard shouldChangeText(in: range, replacementString: "") else { return true }
+        textStorage?.replaceCharacters(in: range, with: "")
+        setSelectedRange(NSRange(location: range.location, length: 0))
+        didChangeText()
+        blocks.forEach { onDeleteStructuredBlock?($0) }
+        return true
+    }
+
+    private func deleteStructuredBlock(_ id: UUID) {
+        guard let match = FocoStructuredBlockSyntax.matches(in: string).first(where: { $0.id == id }),
+              let block = inlineBlockStores[id]?.block else { return }
+        guard shouldChangeText(in: match.lineRange, replacementString: "") else { return }
+        textStorage?.replaceCharacters(in: match.lineRange, with: "")
+        setSelectedRange(NSRange(location: match.lineRange.location, length: 0))
+        didChangeText()
+        onDeleteStructuredBlock?(block)
+    }
+
     private func assetMatches(intersecting selection: NSRange) -> [AssetBlockMatch] {
         let matches = AssetBlockSyntax.matches(in: string)
+        if selection.length == 0 { return [] }
+        return matches.filter { NSIntersectionRange($0.lineRange, selection).length > 0 }
+    }
+
+    private func structuredMatches(intersecting selection: NSRange) -> [FocoStructuredBlockMatch] {
+        let matches = FocoStructuredBlockSyntax.matches(in: string)
         if selection.length == 0 { return [] }
         return matches.filter { NSIntersectionRange($0.lineRange, selection).length > 0 }
     }
@@ -621,6 +846,12 @@ private final class FocoTextView: NSTextView {
         guard let value = sender.draggingPasteboard.string(forType: .string),
               value.hasPrefix("foco-asset:") else { return nil }
         return UUID(uuidString: String(value.dropFirst("foco-asset:".count)))
+    }
+
+    private func draggedStructuredBlockID(from sender: any NSDraggingInfo) -> UUID? {
+        guard let value = sender.draggingPasteboard.string(forType: .string),
+              value.hasPrefix("foco-block:") else { return nil }
+        return UUID(uuidString: String(value.dropFirst("foco-block:".count)))
     }
 
     private func layoutInlineAssetViews() {
@@ -646,6 +877,33 @@ private final class FocoTextView: NSTextView {
                 y: lineRect.minY + 6,
                 width: max(0, bounds.width - textContainerOrigin.x * 2),
                 height: asset.inlinePreviewHeight
+            )
+        }
+    }
+
+    private func layoutInlineStructuredBlockViews() {
+        guard let layoutManager, let textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let matches = FocoStructuredBlockSyntax.matches(in: string)
+        let visibleIDs = Set(matches.map(\.id))
+        for (id, hostedView) in inlineBlockViews {
+            guard visibleIDs.contains(id),
+                  let store = inlineBlockStores[id],
+                  let match = matches.first(where: { $0.id == id }),
+                  let lineRect = visualRect(
+                    for: match.tokenRange,
+                    layoutManager: layoutManager,
+                    textContainer: textContainer
+                  ) else {
+                hostedView.isHidden = true
+                continue
+            }
+            hostedView.isHidden = false
+            hostedView.frame = NSRect(
+                x: textContainerOrigin.x,
+                y: lineRect.minY + 6,
+                width: max(0, bounds.width - textContainerOrigin.x * 2),
+                height: store.block.inlineHeight
             )
         }
     }
@@ -700,6 +958,8 @@ private final class FocoTextView: NSTextView {
         let contentWidth = max(0, bounds.width - origin.x * 2)
         var inCode = false
         var codeRect: NSRect?
+        var inFormula = false
+        var formulaRect: NSRect?
         var previousWasTable = false
 
         source.enumerateSubstrings(
@@ -725,6 +985,24 @@ private final class FocoTextView: NSTextView {
             }
             if inCode {
                 codeRect = codeRect?.union(rect) ?? rect
+                previousWasTable = false
+                return
+            }
+
+            if line.trimmingCharacters(in: .whitespaces) == "$$" {
+                if inFormula {
+                    formulaRect = formulaRect?.union(rect) ?? rect
+                    self.drawFormulaBackground(formulaRect)
+                    formulaRect = nil
+                } else {
+                    formulaRect = rect
+                }
+                inFormula.toggle()
+                previousWasTable = false
+                return
+            }
+            if inFormula {
+                formulaRect = formulaRect?.union(rect) ?? rect
                 previousWasTable = false
                 return
             }
@@ -778,6 +1056,7 @@ private final class FocoTextView: NSTextView {
         }
 
         if inCode { drawCodeBackground(codeRect) }
+        if inFormula { drawFormulaBackground(formulaRect) }
     }
 
     private func visualRect(
@@ -804,17 +1083,39 @@ private final class FocoTextView: NSTextView {
         border.lineWidth = 1
         border.stroke()
     }
+
+    private func drawFormulaBackground(_ sourceRect: NSRect?) {
+        guard let sourceRect else { return }
+        let rect = sourceRect.insetBy(dx: 0, dy: -6)
+        NSColor.controlAccentColor.withAlphaComponent(0.07).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.5).setFill()
+        NSBezierPath(
+            roundedRect: NSRect(x: rect.minX, y: rect.minY, width: 3, height: rect.height),
+            xRadius: 1.5,
+            yRadius: 1.5
+        ).fill()
+        NSColor.separatorColor.withAlphaComponent(0.3).setStroke()
+        let border = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        border.lineWidth = 1
+        border.stroke()
+    }
 }
 
 private struct RichTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var slashQuery: String?
-    @Binding var slashAnchor: CGPoint
     @Binding var selectedRange: NSRange
     @Binding var editorHeight: CGFloat
     let assets: [VaultAsset]
+    let blocks: [FocoStructuredBlock]
     let assetURL: @Sendable (VaultAsset) -> URL?
+    let onImportEmbeddedAsset: @MainActor (URL) async -> VaultAsset?
     let onDeleteAsset: (UUID) -> Void
+    let onUpdateStructuredBlock: (FocoStructuredBlock) -> Void
+    let onDeleteStructuredBlock: (FocoStructuredBlock) -> Void
+    let onMoveStructuredBlock: (UUID, Int) -> Void
+    let onMoveStructuredBlockBy: (UUID, Int) -> Void
     let onMoveAsset: (UUID, Int) -> Void
     let onMoveAssetBy: (UUID, Int) -> Void
     let onSlashKey: (SlashKey) -> Void
@@ -822,6 +1123,8 @@ private struct RichTextEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> FocoTextView {
+        context.coordinator.updatingFromSwiftUI = true
+        defer { context.coordinator.updatingFromSwiftUI = false }
         let view = FocoTextView()
         view.delegate = context.coordinator
         view.isRichText = true
@@ -864,7 +1167,25 @@ private struct RichTextEditor: NSViewRepresentable {
         view.onMoveAssetBy = { [weak coordinator = context.coordinator] assetID, direction in
             coordinator?.parent.onMoveAssetBy(assetID, direction)
         }
+        view.onUpdateStructuredBlock = { [weak coordinator = context.coordinator] block in
+            coordinator?.parent.onUpdateStructuredBlock(block)
+        }
+        view.onDeleteStructuredBlock = { [weak coordinator = context.coordinator] block in
+            coordinator?.parent.onDeleteStructuredBlock(block)
+        }
+        view.onMoveStructuredBlock = { [weak coordinator = context.coordinator] blockID, offset in
+            coordinator?.parent.onMoveStructuredBlock(blockID, offset)
+        }
+        view.onMoveStructuredBlockBy = { [weak coordinator = context.coordinator] blockID, direction in
+            coordinator?.parent.onMoveStructuredBlockBy(blockID, direction)
+        }
         view.configureInlineAssets(assets, assetURL: assetURL)
+        view.configureInlineStructuredBlocks(
+            blocks,
+            assets: assets,
+            assetURL: assetURL,
+            importImage: onImportEmbeddedAsset
+        )
         context.coordinator.style(view)
         context.coordinator.updateHeight(view)
         return view
@@ -872,7 +1193,15 @@ private struct RichTextEditor: NSViewRepresentable {
 
     func updateNSView(_ view: FocoTextView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.updatingFromSwiftUI = true
+        defer { context.coordinator.updatingFromSwiftUI = false }
         view.configureInlineAssets(assets, assetURL: assetURL)
+        view.configureInlineStructuredBlocks(
+            blocks,
+            assets: assets,
+            assetURL: assetURL,
+            importImage: onImportEmbeddedAsset
+        )
         let contentChanged = view.string != text
         if contentChanged {
             view.string = text
@@ -885,7 +1214,6 @@ private struct RichTextEditor: NSViewRepresentable {
         if contentChanged {
             DispatchQueue.main.async {
                 view.window?.makeFirstResponder(view)
-                context.coordinator.updateSlashAnchor(view)
             }
         }
     }
@@ -894,26 +1222,27 @@ private struct RichTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: RichTextEditor
         private var styling = false
+        var updatingFromSwiftUI = false
         init(_ parent: RichTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
-            guard !styling, let view = notification.object as? FocoTextView else { return }
+            guard !styling, !updatingFromSwiftUI,
+                  let view = notification.object as? FocoTextView else { return }
             let selection = view.selectedRange()
             parent.text = view.string
             parent.selectedRange = selection
             parent.slashQuery = Self.query(before: selection.location, in: view.string)
             style(view)
             updateHeight(view)
-            if parent.slashQuery != nil { updateSlashAnchor(view) }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let view = notification.object as? FocoTextView else { return }
+            guard !styling, !updatingFromSwiftUI,
+                  let view = notification.object as? FocoTextView else { return }
             let selection = view.selectedRange()
             parent.selectedRange = selection
             if parent.slashQuery != nil {
                 parent.slashQuery = Self.query(before: selection.location, in: view.string)
-                updateSlashAnchor(view)
             }
         }
 
@@ -946,6 +1275,7 @@ private struct RichTextEditor: NSViewRepresentable {
             let source = storage.string as NSString
             let textWidth = max(300, view.bounds.width)
             var inCode = false
+            var inFormula = false
             var previousWasTable = false
             source.enumerateSubstrings(
                 in: NSRange(location: 0, length: source.length),
@@ -975,6 +1305,36 @@ private struct RichTextEditor: NSViewRepresentable {
                     storage.addAttributes([
                         .font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular),
                         .paragraphStyle: code
+                    ], range: lineRange)
+                    previousWasTable = false
+                    return
+                }
+
+                if line.trimmingCharacters(in: .whitespaces) == "$$" {
+                    let fence = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                    fence.minimumLineHeight = 10
+                    fence.maximumLineHeight = 10
+                    fence.paragraphSpacing = 0
+                    storage.addAttributes([
+                        .font: NSFont.systemFont(ofSize: 1),
+                        .foregroundColor: NSColor.clear,
+                        .paragraphStyle: fence
+                    ], range: lineRange)
+                    inFormula.toggle()
+                    previousWasTable = false
+                    return
+                }
+                if inFormula {
+                    let formula = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                    formula.alignment = .center
+                    formula.paragraphSpacing = 2
+                    let serifDescriptor = NSFont.systemFont(ofSize: 20).fontDescriptor.withDesign(.serif) ?? NSFont.systemFont(ofSize: 20).fontDescriptor
+                    let serif = NSFont(descriptor: serifDescriptor, size: 20) ?? NSFont.systemFont(ofSize: 20)
+                    let italic = NSFontManager.shared.convert(serif, toHaveTrait: .italicFontMask)
+                    storage.addAttributes([
+                        .font: italic,
+                        .foregroundColor: NSColor.labelColor,
+                        .paragraphStyle: formula
                     ], range: lineRange)
                     previousWasTable = false
                     return
@@ -1080,6 +1440,20 @@ private struct RichTextEditor: NSViewRepresentable {
                 ], range: match.tokenRange)
             }
 
+            let blocksByID = Dictionary(uniqueKeysWithValues: parent.blocks.map { ($0.id, $0) })
+            for match in FocoStructuredBlockSyntax.matches(in: storage.string) {
+                guard let block = blocksByID[match.id] else { continue }
+                let blockParagraph = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                blockParagraph.minimumLineHeight = block.inlineHeight + 12
+                blockParagraph.maximumLineHeight = block.inlineHeight + 12
+                blockParagraph.paragraphSpacing = 0
+                storage.addAttributes([
+                    .foregroundColor: NSColor.clear,
+                    .font: NSFont.systemFont(ofSize: 1),
+                    .paragraphStyle: blockParagraph
+                ], range: match.tokenRange)
+            }
+
             if let markdownLink = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\((https?://[^\s)]+)\)"#) {
                 markdownLink.enumerateMatches(in: storage.string, range: all) { match, _, _ in
                     guard let match,
@@ -1129,22 +1503,6 @@ private struct RichTextEditor: NSViewRepresentable {
             let height = max(180, measured)
             guard abs(parent.editorHeight - height) > 1 else { return }
             DispatchQueue.main.async { self.parent.editorHeight = height }
-        }
-
-        func updateSlashAnchor(_ view: NSTextView) {
-            let selection = view.selectedRange()
-            var actualRange = NSRange(location: NSNotFound, length: 0)
-            let screenRect = view.firstRect(
-                forCharacterRange: NSRange(location: selection.location, length: 0),
-                actualRange: &actualRange
-            )
-            guard let window = view.window else { return }
-            let windowRect = window.convertFromScreen(screenRect)
-            let localRect = view.convert(windowRect, from: nil)
-            parent.slashAnchor = CGPoint(
-                x: max(0, localRect.minX),
-                y: max(0, localRect.maxY)
-            )
         }
 
         private static func query(before cursor: Int, in text: String) -> String? {

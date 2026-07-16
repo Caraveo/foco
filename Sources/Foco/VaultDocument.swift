@@ -7,6 +7,11 @@ struct VaultPage: Codable, Identifiable, Hashable, Sendable {
     var title: String
     var content: String
     var assetIDs: [UUID]? = nil
+    /// Structured views are stored in separate `Blocks/<id>.json` entries.
+    /// The manifest keeps only their IDs; the selected page owns loaded data.
+    var blockIDs: [UUID]? = nil
+    var blocks: [FocoStructuredBlock]? = nil
+    var category: String? = nil
 }
 
 struct VaultAsset: Codable, Identifiable, Hashable, Sendable {
@@ -75,7 +80,7 @@ enum AssetBlockSyntax {
 }
 
 struct VaultManifest: Codable, Sendable {
-    var version = 5
+    var version = 6
     var title = "Untitled Bulb"
     /// Page content is stored separately in `Pages/<id>.md`; these are summaries.
     var pages = [VaultPage(title: "Welcome", content: "")]
@@ -100,7 +105,12 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
 
     init() {
         let initialPage = VaultPage(title: "Welcome", content: "# Welcome to Foco\n\nType / to add something.")
-        manifest = VaultManifest(pages: [VaultPage(id: initialPage.id, title: initialPage.title, content: "")])
+        manifest = VaultManifest(pages: [VaultPage(
+            id: initialPage.id,
+            title: initialPage.title,
+            content: "",
+            blockIDs: initialPage.blockIDs
+        )])
         archive = try! BulbArchive.temporary()
         try? archive.initialize(manifest: manifest, pages: [initialPage])
     }
@@ -117,9 +127,7 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
     }
 
     func snapshot(contentType: UTType) throws -> URL {
-        if let currentPage { try archive.persist(page: currentPage, manifest: manifest) }
-        else { try archive.persist(manifest: manifest) }
-        return archive.url
+        try archive.makeSaveSnapshot(page: currentPage, manifest: manifest)
     }
 
     func fileWrapper(snapshot: URL, configuration: WriteConfiguration) throws -> FileWrapper {
@@ -142,7 +150,12 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
                 return
             }
             guard (try? normalized.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true else { return }
-            let replacement = try BulbArchive(url: normalized, ownsArchive: false)
+            // Never edit or snapshot directly from the file coordinated by
+            // DocumentGroup. Keeping a disk-backed working copy prevents a
+            // save deadlock where FileWrapper reads the same URL that macOS
+            // has locked for writing. This is a filesystem copy, not a
+            // whole-document in-memory load.
+            let replacement = try BulbArchive.temporary(copying: normalized)
             archive = replacement
             manifest = try replacement.loadManifest()
             adoptedFileURL = normalized
@@ -178,6 +191,8 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
         if let index = manifest.pages.firstIndex(where: { $0.id == page.id }) {
             manifest.pages[index].title = page.title
             manifest.pages[index].assetIDs = page.assetIDs
+            manifest.pages[index].blockIDs = page.blocks?.map(\.id) ?? page.blockIDs
+            manifest.pages[index].category = page.category
         }
     }
 
@@ -188,16 +203,16 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
     }
 
     @discardableResult
-    func addPage() -> VaultPage {
+    func addPage(category: String? = nil) -> VaultPage {
         do {
             if let currentPage { try archive.persist(page: currentPage, manifest: manifest) }
-            let page = VaultPage(title: "Untitled", content: "")
-            manifest.pages.append(VaultPage(id: page.id, title: page.title, content: ""))
+            let page = VaultPage(title: "Untitled", content: "", category: category)
+            manifest.pages.append(VaultPage(id: page.id, title: page.title, content: "", blockIDs: [], category: category))
             try archive.addPage(page, manifest: manifest)
             return page
         } catch {
             report(error)
-            return VaultPage(title: "Untitled", content: "")
+            return VaultPage(title: "Untitled", content: "", category: category)
         }
     }
 
@@ -215,7 +230,12 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
         }
     }
 
-    func importAsset(from url: URL, mediaType: String, insertionUTF16Offset: Int? = nil) async throws -> VaultAsset {
+    func importAsset(
+        from url: URL,
+        mediaType: String,
+        insertionUTF16Offset: Int? = nil,
+        insertBlockToken: Bool = true
+    ) async throws -> VaultAsset {
         guard let pageID = currentPage?.id else { throw BulbArchiveError.noSelectedPage }
         if let currentPage { try archive.persist(page: currentPage, manifest: manifest) }
         let accessing = url.startAccessingSecurityScopedResource()
@@ -226,7 +246,8 @@ final class VaultDocument: ReferenceFileDocument, @unchecked Sendable {
                 from: url,
                 mediaType: mediaType,
                 pageID: pageID,
-                insertionUTF16Offset: insertionUTF16Offset
+                insertionUTF16Offset: insertionUTF16Offset,
+                insertBlockToken: insertBlockToken
             )
         }.value
         await MainActor.run {
@@ -285,6 +306,44 @@ private enum BulbArchiveError: LocalizedError {
     }
 }
 
+private enum BulbSaveSnapshots {
+    private static let lifetime: TimeInterval = 60 * 60
+
+    static func copy(of source: URL) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FocoSaveSnapshots", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        removeExpiredSnapshots(in: directory)
+        let snapshot = directory.appendingPathComponent("\(UUID().uuidString).bulb")
+        try FileManager.default.copyItem(at: source, to: snapshot)
+
+        // FileWrapper reads regular files lazily. Keep each snapshot available
+        // long enough for even a large video-heavy bulb to finish saving, then
+        // remove it without retaining any document bytes in memory.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + lifetime) {
+            try? FileManager.default.removeItem(at: snapshot)
+        }
+        return snapshot
+    }
+
+    private static func removeExpiredSnapshots(in directory: URL) {
+        let cutoff = Date().addingTimeInterval(-lifetime)
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        for file in files {
+            guard let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  let modified = values.contentModificationDate,
+                  modified < cutoff else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
 private final class BulbArchive: @unchecked Sendable {
     let url: URL
     private let workingDirectory: URL
@@ -297,6 +356,12 @@ private final class BulbArchive: @unchecked Sendable {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return try BulbArchive(url: folder.appendingPathComponent("Working.bulb"), ownsArchive: true)
+    }
+
+    static func temporary(copying source: URL) throws -> BulbArchive {
+        let archive = try temporary()
+        try FileManager.default.copyItem(at: source, to: archive.url)
+        return archive
     }
 
     init(url: URL, ownsArchive: Bool) throws {
@@ -315,7 +380,7 @@ private final class BulbArchive: @unchecked Sendable {
 
     func initialize(manifest: VaultManifest, pages: [VaultPage]) throws {
         try locked {
-            for page in pages { try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate) }
+            for page in pages { try writePage(page) }
             try writeManifest(manifest)
         }
     }
@@ -331,13 +396,28 @@ private final class BulbArchive: @unchecked Sendable {
         try locked {
             guard let summary = manifest.pages.first(where: { $0.id == id }) else { throw BulbArchiveError.invalidDocument }
             let content = String(data: try read(entry: pageEntry(id)), encoding: .utf8) ?? ""
-            return VaultPage(id: id, title: summary.title, content: content, assetIDs: summary.assetIDs)
+            let references = FocoStructuredBlockSyntax.matches(in: content)
+            let blocks = references.map { reference -> FocoStructuredBlock in
+                guard let data = try? read(entry: blockEntry(reference.id)),
+                      let decoded = try? JSONDecoder().decode(FocoStructuredBlock.self, from: data) else {
+                    return FocoStructuredBlock(id: reference.id, kind: reference.kind)
+                }
+                return decoded
+            }
+            return VaultPage(
+                id: id,
+                title: summary.title,
+                content: content,
+                assetIDs: summary.assetIDs,
+                blockIDs: references.map(\.id),
+                blocks: blocks
+            )
         }
     }
 
     func persist(page: VaultPage, manifest: VaultManifest) throws {
         try locked {
-            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+            try writePage(page)
             try writeManifest(manifest)
         }
     }
@@ -346,9 +426,23 @@ private final class BulbArchive: @unchecked Sendable {
         try locked { try writeManifest(manifest) }
     }
 
+    /// Returns an immutable, disk-backed copy for DocumentGroup to hand to
+    /// macOS. FileWrapper may read lazily, so the snapshot must not live below
+    /// this archive's working directory or disappear when a document is
+    /// replaced, closed, or reopened during a coordinated save.
+    func makeSaveSnapshot(page: VaultPage?, manifest: VaultManifest) throws -> URL {
+        try locked {
+            if let page {
+                try writePage(page)
+            }
+            try writeManifest(manifest)
+            return try BulbSaveSnapshots.copy(of: url)
+        }
+    }
+
     func addPage(_ page: VaultPage, manifest: VaultManifest) throws {
         try locked {
-            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+            try writePage(page)
             try writeManifest(manifest)
         }
     }
@@ -357,6 +451,7 @@ private final class BulbArchive: @unchecked Sendable {
         try locked {
             var entries = [pageEntry(page.id)]
             entries += assets.map(assetEntry)
+            entries += (page.blockIDs ?? page.blocks?.map(\.id) ?? []).map(blockEntry)
             try delete(entries: entries)
             try writeManifest(manifest)
         }
@@ -366,7 +461,8 @@ private final class BulbArchive: @unchecked Sendable {
         from source: URL,
         mediaType: String,
         pageID: UUID,
-        insertionUTF16Offset: Int?
+        insertionUTF16Offset: Int?,
+        insertBlockToken: Bool
     ) throws -> (asset: VaultAsset, page: VaultPage, manifest: VaultManifest) {
         try locked {
             var manifest = try loadManifest()
@@ -382,12 +478,14 @@ private final class BulbArchive: @unchecked Sendable {
             manifest.pages[pageIndex].assetIDs = ids
             var page = try loadPage(id: pageID, manifest: manifest)
             page.assetIDs = ids
-            page.content = AssetBlockSyntax.inserting(
-                asset,
-                into: page.content,
-                atUTF16Offset: insertionUTF16Offset
-            )
-            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+            if insertBlockToken {
+                page.content = AssetBlockSyntax.inserting(
+                    asset,
+                    into: page.content,
+                    atUTF16Offset: insertionUTF16Offset
+                )
+            }
+            try writePage(page)
             try writeManifest(manifest)
             return (asset, page, manifest)
         }
@@ -395,7 +493,7 @@ private final class BulbArchive: @unchecked Sendable {
 
     func deleteAsset(_ asset: VaultAsset, from page: VaultPage, removeFile: Bool, manifest: VaultManifest) throws {
         try locked {
-            try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+            try writePage(page)
             if removeFile {
                 try delete(entries: [assetEntry(asset)])
                 let cached = workingDirectory
@@ -424,8 +522,10 @@ private final class BulbArchive: @unchecked Sendable {
         let old = try JSONDecoder().decode(VaultManifest.self, from: json)
         let archive = try BulbArchive.temporary()
         var manifest = old
-        manifest.version = 5
-        manifest.pages = old.pages.map { VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs) }
+        manifest.version = 6
+        manifest.pages = old.pages.map {
+            VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs, blockIDs: $0.blockIDs)
+        }
         try archive.initialize(manifest: manifest, pages: old.pages)
         for asset in old.assets {
             let source = packageURL.appendingPathComponent("Assets", isDirectory: true).appendingPathComponent(asset.storedFilename)
@@ -441,11 +541,45 @@ private final class BulbArchive: @unchecked Sendable {
 
     private func writeManifest(_ manifest: VaultManifest) throws {
         var portable = manifest
-        portable.version = 5
-        portable.pages = portable.pages.map { VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs) }
+        portable.version = 6
+        portable.pages = portable.pages.map {
+            VaultPage(
+                id: $0.id,
+                title: $0.title,
+                content: "",
+                assetIDs: $0.assetIDs,
+                blockIDs: $0.blocks?.map(\.id) ?? $0.blockIDs,
+                blocks: nil
+            )
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try write(data: encoder.encode(portable), entry: "manifest.json", compression: .deflate)
+        pruneOrphanBlocks(keeping: Set(portable.pages.flatMap { $0.blockIDs ?? [] }))
+    }
+
+    private func writePage(_ page: VaultPage) throws {
+        try write(data: Data(page.content.utf8), entry: pageEntry(page.id), compression: .deflate)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        for block in page.blocks ?? [] {
+            try write(data: encoder.encode(block), entry: blockEntry(block.id), compression: .deflate)
+        }
+    }
+
+    private func pruneOrphanBlocks(keeping activeIDs: Set<UUID>) {
+        guard let listingData = try? run(
+            "/usr/bin/unzip",
+            ["-Z1", url.path],
+            captureOutput: true
+        ), let listing = String(data: listingData, encoding: .utf8) else { return }
+        let staleEntries = listing.components(separatedBy: "\n").filter { entry in
+            guard entry.hasPrefix("Blocks/"), entry.hasSuffix(".json") else { return false }
+            let filename = URL(fileURLWithPath: entry).deletingPathExtension().lastPathComponent
+            guard let id = UUID(uuidString: filename) else { return false }
+            return !activeIDs.contains(id)
+        }
+        try? delete(entries: staleEntries)
     }
 
     private func read(entry: String) throws -> Data {
@@ -490,6 +624,7 @@ private final class BulbArchive: @unchecked Sendable {
     }
 
     private func pageEntry(_ id: UUID) -> String { "Pages/\(id.uuidString).md" }
+    private func blockEntry(_ id: UUID) -> String { "Blocks/\(id.uuidString).json" }
     private func assetEntry(_ asset: VaultAsset) -> String { "Assets/\(asset.storedFilename)" }
 
     @discardableResult

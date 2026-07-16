@@ -15,6 +15,15 @@ Both apps work completely locally. Foco remains the owning macOS editor for `.bu
 
 A native Windows 11 reader is available in [`win11`](win11/README.md). It opens the same portable `.bulb` files read-only with a WinUI 3 interface.
 
+## Release downloads
+
+Version [`v0.1.0`](https://github.com/Caraveo/foco/releases/tag/v0.1.0) includes separate macOS archives for the editor and the free reader:
+
+- `Foco-macOS-v0.1.0.zip` — the editable Foco document app.
+- `Foco-View-macOS-v0.1.0.zip` — the read-only Foco View app.
+
+Both require macOS 14 or newer. The release apps are ad-hoc signed for local distribution; macOS may require Control-click → **Open** the first time they are launched.
+
 ## What works today
 
 This repository contains a working local-first prototype:
@@ -23,9 +32,11 @@ This repository contains a working local-first prototype:
 - Create, open, and save `.bulb` documents
 - Page hierarchy in the left sidebar
 - Markdown-friendly document editor that starts at the top of the page
-- Cursor-anchored `/` menu with keyboard filtering and selection
+- Bottom-centered `/` menu that rises above the editor, with keyboard filtering and selection
 - Insert headings, prompts, links, tables, Kanban boards, calendars, lists, galleries, timelines, PDFs, videos, audio, images, and files
-- Rendered dividers, tables, code blocks, quotes, prompts, and automatic clickable `http://` and `https://` links
+- Fully editable table, Kanban, calendar, list, gallery, and timeline blocks with native controls
+- Rendered dividers, code blocks, LaTeX formulas, quotes, prompts, and automatic clickable `http://` and `https://` links
+- Clickable checklist items, editable table cells, movable Kanban cards, month navigation, gallery image previews, and dated timeline entries
 - Automatic continuation for bulleted lists, numbered lists, checklists, quotes, and table rows
 - Assets are copied into the `.bulb`, so the document remains portable
 - Attachments are true inline blocks that can be dragged or moved up/down between text
@@ -44,31 +55,31 @@ Project.bulb
 ├── manifest.json
 ├── Pages/
 │   └── <page-id>.md
+├── Blocks/
+│   └── <block-id>.json
 └── Assets/
     ├── <asset-id>-brief.pdf
     └── <asset-id>-demo.mov
 ```
 
-Foco loads only `manifest.json` at open. It reads only the selected Markdown page and extracts an asset only when its preview appears. Videos, audio, PDFs, and images remain real files inside the archive and are never loaded into one large in-memory value.
+Foco loads only `manifest.json` at open. It reads only the selected Markdown page and the structured blocks referenced by that page. An asset is extracted only when its preview appears. Videos, audio, PDFs, and images remain real files inside the archive and are never loaded into one large in-memory value.
 
 Page text and metadata use normal ZIP compression. Media is stored without recompression because PDFs, images, audio, and videos are normally compressed already; recompressing would waste time or reduce quality.
 
 ## Run
 
-Open `Package.swift` in Xcode and run the `Foco` scheme, or use:
-
-```bash
-swift run Foco
-```
-
-To install a development app bundle and register `.bulb` with Finder:
+For normal document creation, opening, and saving, install and launch the app bundle:
 
 ```bash
 ./Scripts/install-dev-app.sh
 open ~/Applications/Foco.app
 ```
 
-The installer creates a signed local app bundle, declares `app.foco.bulb` as an editable document type, and registers Foco as its owner with Launch Services. Running the raw SwiftPM executable alone cannot register a macOS document extension.
+`swift run Foco` is useful for a quick UI build, but the raw SwiftPM executable has no app-bundle identity or document registration. Do not use that launch mode to test `.bulb` saving or Finder integration.
+
+You can also open `Package.swift` in Xcode and run the `Foco` scheme for development.
+
+The installer creates a signed local app bundle, declares `app.foco.bulb` as an editable document type, and registers Foco as its owner with Launch Services.
 
 Build or install the free read-only viewer separately:
 
@@ -82,11 +93,19 @@ The viewer installs as `~/Applications/Foco View.app` with bundle identifier `ap
 
 The app requires macOS 14 or newer.
 
+To build the same two release archives locally:
+
+```bash
+./Scripts/build-release.sh 0.0.1
+```
+
 ## Editing
 
 - Choose a page in the sidebar.
 - Write plain text or Markdown.
-- Type `/` to open the block menu directly beneath the cursor. Continue typing to filter it, use ↑/↓ to move, Return to insert, or Escape to close it. Mouse selection also works.
+- Type `/` to raise the block menu from the bottom center. Continue typing to filter it, use ↑/↓ to move, Return to insert, or Escape to close it. Mouse selection also works.
+- Tables support editable rows, columns, headers, and cells. Boards support editable columns and movable cards. Calendars provide month navigation and timed events. Lists support search, tags, notes, completion, and reordering. Galleries store and preview local images. Timelines provide dated, sortable milestones.
+- Move any structured block with its footer handle or arrow controls, or delete it from the same footer.
 - Paste or type an `http://` or `https://` address to create a clickable link automatically.
 - Drag one or several files anywhere over the workspace to attach them to the selected page; Foco detects their type from macOS metadata and filename extension.
 - Move an attachment with its drag handle or arrow controls. Put the caret against an attachment and press Backspace/Delete to remove it.
@@ -98,7 +117,7 @@ The app requires macOS 14 or newer.
 2. **One portable document:** moving a `.bulb` moves the whole workspace.
 3. **Plain, durable content:** text remains readable even without Foco.
 4. **Native behavior:** standard macOS documents, menus, keyboard navigation, autosave, and accessibility.
-5. **Simple before clever:** no block database or collaboration layer until the core editor feels excellent.
+5. **Simple before clever:** structured blocks stay as small local JSON files inside the document; there is no server database or collaboration layer.
 
 ## Next sensible steps
 
@@ -119,19 +138,34 @@ swift build -j 1
 Verify that `.bulb` remains one ZIP-compatible file with ordinary page and media entries:
 
 ```bash
-swiftc -parse-as-library Sources/Foco/VaultDocument.swift Tools/StorageSmoke.swift \
+swiftc -parse-as-library \
+  Sources/Foco/FocoTheme.swift Sources/Foco/StructuredBlocks.swift \
+  Sources/Foco/VaultDocument.swift Tools/StorageSmoke.swift \
   -o /tmp/foco-storage-smoke \
-  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers
+  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers -framework Combine
 /tmp/foco-storage-smoke
+```
+
+Verify every structured block can be inserted in document order, saved independently, and reopened:
+
+```bash
+swiftc -parse-as-library \
+  Sources/Foco/FocoTheme.swift Sources/Foco/StructuredBlocks.swift \
+  Sources/Foco/VaultDocument.swift Tools/StructuredBlocksSmoke.swift \
+  -o /tmp/foco-blocks-smoke \
+  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers -framework Combine
+/tmp/foco-blocks-smoke
 ```
 
 Verify that Foco View lazily reads the manifest, one page, and one asset without changing the source file:
 
 ```bash
 swiftc -parse-as-library \
-  Sources/Foco/VaultDocument.swift Sources/FocoView/ViewerDocument.swift Tools/ViewerSmoke.swift \
+  Sources/Foco/FocoTheme.swift Sources/Foco/StructuredBlocks.swift Sources/Foco/VaultDocument.swift \
+  Sources/FocoView/ViewerStructuredBlocks.swift Sources/FocoView/ViewerDocument.swift \
+  Tools/ViewerSmoke.swift \
   -o /tmp/foco-viewer-smoke \
-  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers
+  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers -framework Combine
 /tmp/foco-viewer-smoke
 ```
 

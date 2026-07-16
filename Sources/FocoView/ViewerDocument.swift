@@ -7,6 +7,8 @@ struct ViewerPageSummary: Codable, Identifiable, Hashable, Sendable {
     let title: String
     let content: String?
     let assetIDs: [UUID]?
+    let blockIDs: [UUID]?
+    let category: String?
 }
 
 struct ViewerAsset: Codable, Identifiable, Hashable, Sendable {
@@ -27,6 +29,7 @@ struct ViewerManifest: Codable, Sendable {
 struct ViewerLoadedPage: Identifiable, Sendable {
     let summary: ViewerPageSummary
     let content: String
+    let blocks: [ViewerStructuredBlock]
     var id: UUID { summary.id }
 }
 
@@ -87,11 +90,11 @@ final class ViewerDocument: ObservableObject {
 
         Task {
             do {
-                let content = try await Task.detached(priority: .userInitiated) {
+                let loaded = try await Task.detached(priority: .userInitiated) {
                     try archive.loadPage(id)
                 }.value
                 guard requestGeneration == generation, selectedPageID == id else { return }
-                currentPage = ViewerLoadedPage(summary: summary, content: content)
+                currentPage = ViewerLoadedPage(summary: summary, content: loaded.content, blocks: loaded.blocks)
                 isLoading = false
             } catch {
                 guard requestGeneration == generation else { return }
@@ -152,13 +155,20 @@ final class ViewerArchive: @unchecked Sendable {
         }
     }
 
-    func loadPage(_ id: UUID) throws -> String {
+    func loadPage(_ id: UUID) throws -> (content: String, blocks: [ViewerStructuredBlock]) {
         try locked {
             let data = try run("/usr/bin/unzip", ["-p", url.path, "Pages/\(id.uuidString).md"])
             guard let content = String(data: data, encoding: .utf8) else {
                 throw ViewerArchiveError.invalidDocument
             }
-            return content
+            let blocks: [ViewerStructuredBlock] = ViewerStructuredBlockSyntax.references(in: content).compactMap { reference -> ViewerStructuredBlock? in
+                guard let data = try? run(
+                    "/usr/bin/unzip",
+                    ["-p", url.path, "Blocks/\(reference.id.uuidString).json"]
+                ) else { return nil }
+                return try? JSONDecoder().decode(ViewerStructuredBlock.self, from: data)
+            }
+            return (content, blocks)
         }
     }
 

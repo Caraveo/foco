@@ -16,8 +16,14 @@ enum FocoTheme {
 
 enum FocoResources {
     static func url(forResource name: String, withExtension fileExtension: String) -> URL? {
-        Bundle.main.url(forResource: name, withExtension: fileExtension)
-            ?? Bundle.module.url(forResource: name, withExtension: fileExtension)
+        if let bundled = Bundle.main.url(forResource: name, withExtension: fileExtension) {
+            return bundled
+        }
+        #if SWIFT_PACKAGE
+        return Bundle.module.url(forResource: name, withExtension: fileExtension)
+        #else
+        return nil
+        #endif
     }
 
     static var bulbImage: NSImage {

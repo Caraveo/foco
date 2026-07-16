@@ -111,11 +111,34 @@ private struct ViewerRootView: View {
     }
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
+        let manifest = document.manifest
+        let categories: [String] = {
+            guard let manifest else { return [] }
+            var cats = Set<String>()
+            for page in manifest.pages {
+                let cat = page.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                cats.insert(cat.isEmpty ? "General" : cat)
+            }
+            if cats.isEmpty {
+                cats.insert("General")
+            }
+            return cats.sorted()
+        }()
+
+        func pages(for category: String) -> [ViewerPageSummary] {
+            guard let manifest else { return [] }
+            return manifest.pages.filter { page in
+                let cat = page.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let mappedCat = cat.isEmpty ? "General" : cat
+                return mappedCat.localizedCaseInsensitiveCompare(category) == .orderedSame
+            }
+        }
+
+        return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 ViewerMark(size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(document.manifest?.title ?? "Foco View")
+                    Text(manifest?.title ?? "Foco View")
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                     Text("READ ONLY")
@@ -130,33 +153,47 @@ private struct ViewerRootView: View {
 
             Divider()
 
-            if let manifest = document.manifest {
+            if manifest != nil {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(manifest.pages) { page in
-                            Button {
-                                document.selectPage(page.id)
-                            } label: {
-                                HStack(spacing: 9) {
-                                    Image(systemName: "doc.text")
-                                        .font(.system(size: 12))
+                    LazyVStack(spacing: 16) {
+                        ForEach(categories, id: \.self) { category in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(category.uppercased())
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .tracking(0.5)
                                         .foregroundStyle(.secondary)
-                                    Text(page.title.isEmpty ? "Untitled" : page.title)
-                                        .font(.system(size: 13))
-                                        .lineLimit(1)
                                     Spacer()
                                 }
-                                .padding(.horizontal, 9)
-                                .frame(height: 32)
-                                .background(
-                                    document.selectedPageID == page.id
-                                        ? Color.primary.opacity(0.08)
-                                        : .clear,
-                                    in: RoundedRectangle(cornerRadius: 7)
-                                )
-                                .contentShape(Rectangle())
+                                .padding(.leading, 9)
+                                .padding(.top, 4)
+
+                                ForEach(pages(for: category)) { page in
+                                    Button {
+                                        document.selectPage(page.id)
+                                    } label: {
+                                        HStack(spacing: 9) {
+                                            Image(systemName: "doc.text")
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(.secondary)
+                                            Text(page.title.isEmpty ? "Untitled" : page.title)
+                                                .font(.system(size: 13))
+                                                .lineLimit(1)
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 32)
+                                        .background(
+                                            document.selectedPageID == page.id
+                                                ? Color.primary.opacity(0.08)
+                                                : .clear,
+                                            in: RoundedRectangle(cornerRadius: 7)
+                                        )
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     .padding(7)

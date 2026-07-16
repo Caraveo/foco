@@ -12,7 +12,9 @@ struct ViewerBlock: Identifiable {
         case todo(String)
         case divider
         case code(String)
+        case formula(String)
         case table([[String]])
+        case structured(ViewerStructuredBlock)
         case asset(UUID)
         case spacer
     }
@@ -22,8 +24,9 @@ struct ViewerBlock: Identifiable {
 }
 
 enum ViewerBlockParser {
-    static func parse(_ content: String) -> [ViewerBlock] {
+    static func parse(_ content: String, structuredBlocks: [ViewerStructuredBlock] = []) -> [ViewerBlock] {
         let lines = content.components(separatedBy: "\n")
+        let structuredByID = Dictionary(uniqueKeysWithValues: structuredBlocks.map { ($0.id, $0) })
         var blocks: [ViewerBlock] = []
         var index = 0
 
@@ -43,6 +46,18 @@ enum ViewerBlockParser {
                 continue
             }
 
+            if trimmed == "$$" {
+                var formula: [String] = []
+                index += 1
+                while index < lines.count && lines[index].trimmingCharacters(in: .whitespaces) != "$$" {
+                    formula.append(lines[index])
+                    index += 1
+                }
+                if index < lines.count { index += 1 }
+                blocks.append(ViewerBlock(kind: .formula(formula.joined(separator: "\n"))))
+                continue
+            }
+
             if line.contains("\t") {
                 var rows: [[String]] = []
                 while index < lines.count && lines[index].contains("\t") {
@@ -53,7 +68,10 @@ enum ViewerBlockParser {
                 continue
             }
 
-            if let assetID = assetID(in: trimmed) {
+            if let blockID = ViewerStructuredBlockSyntax.id(in: trimmed),
+               let structured = structuredByID[blockID] {
+                blocks.append(ViewerBlock(kind: .structured(structured)))
+            } else if let assetID = assetID(in: trimmed) {
                 blocks.append(ViewerBlock(kind: .asset(assetID)))
             } else if trimmed == "---" {
                 blocks.append(ViewerBlock(kind: .divider))
@@ -108,7 +126,9 @@ struct ViewerPageView: View {
     let page: ViewerLoadedPage
     @ObservedObject var document: ViewerDocument
 
-    private var blocks: [ViewerBlock] { ViewerBlockParser.parse(page.content) }
+    private var blocks: [ViewerBlock] {
+        ViewerBlockParser.parse(page.content, structuredBlocks: page.blocks)
+    }
 
     var body: some View {
         ScrollView {
@@ -215,8 +235,26 @@ private struct ViewerBlockView: View {
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.08)))
             .padding(.vertical, 7)
+        case .formula(let value):
+            Text(value.isEmpty ? "E = mc^2" : value)
+                .font(.system(size: 20, weight: .regular, design: .serif).italic())
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 18)
+                .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.accentColor.opacity(0.5))
+                        .frame(width: 3)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
+                .padding(.vertical, 7)
         case .table(let rows):
             ViewerTable(rows: rows).padding(.vertical, 8)
+        case .structured(let structured):
+            ViewerStructuredBlockView(block: structured, document: document)
         case .asset(let id):
             if let asset = document.asset(id) {
                 ViewerAssetCard(asset: asset, document: document)

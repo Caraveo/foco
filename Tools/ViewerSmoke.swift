@@ -12,6 +12,32 @@ struct ViewerSmoke {
         let sourceDocument = VaultDocument()
         guard let pageID = sourceDocument.manifest.pages.first?.id else { fatalError("Missing page") }
         sourceDocument.selectPage(pageID)
+        var calendar = FocoStructuredBlock(kind: .calendar)
+        calendar.calendarEvents.append(FocoCalendarEvent(
+            date: FocoBlockDate.dayKey(Date()),
+            title: "Viewer event"
+        ))
+        let structuredBlocks = [
+            FocoStructuredBlock(kind: .table),
+            FocoStructuredBlock(kind: .board),
+            calendar,
+            FocoStructuredBlock(kind: .list),
+            FocoStructuredBlock(kind: .gallery),
+            FocoStructuredBlock(kind: .timeline)
+        ]
+        if var sourcePage = sourceDocument.currentPage {
+            for block in structuredBlocks {
+                let insertion = FocoStructuredBlockSyntax.inserting(
+                    block,
+                    into: sourcePage.content,
+                    replacing: NSRange(location: sourcePage.content.utf16.count, length: 0)
+                )
+                sourcePage.content = insertion.content
+            }
+            sourcePage.blocks = structuredBlocks
+            sourcePage.blockIDs = structuredBlocks.map(\.id)
+            sourceDocument.updateCurrentPage(sourcePage)
+        }
 
         let sourceMedia = FileManager.default.temporaryDirectory
             .appendingPathComponent("foco-viewer-smoke.mp4")
@@ -32,7 +58,9 @@ struct ViewerSmoke {
         precondition(manifest.assets.first?.id == asset.id)
 
         let page = try viewer.loadPage(pageID)
-        precondition(page.contains("[[asset:\(asset.id.uuidString)|"))
+        precondition(page.content.contains("[[asset:\(asset.id.uuidString)|"))
+        precondition(page.blocks.count == 6)
+        precondition(page.blocks.first(where: { $0.kind == .calendar })?.calendarEvents.first?.title == "Viewer event")
         guard let viewerAsset = manifest.assets.first,
               try viewer.materialize(viewerAsset).resourceValues(forKeys: [.fileSizeKey]).fileSize == 512 * 1024 + 17 else {
             fatalError("Viewer failed to materialize the asset")
