@@ -17,10 +17,10 @@ A native Windows 11 reader is available in [`win11`](win11/README.md). It opens 
 
 ## Release downloads
 
-Version [`v0.1.0`](https://github.com/Caraveo/foco/releases/tag/v0.1.0) includes separate macOS archives for the editor and the free reader:
+Version [`v0.2.0`](https://github.com/Caraveo/foco/releases/tag/v0.2.0) includes separate macOS archives for the editor and the free reader:
 
-- `Foco-macOS-v0.1.0.zip` — the editable Foco document app.
-- `Foco-View-macOS-v0.1.0.zip` — the read-only Foco View app.
+- `Foco-macOS-v0.2.0.zip` — the editable Foco document app.
+- `Foco-View-macOS-v0.2.0.zip` — the read-only Foco View app.
 
 Both require macOS 14 or newer. The release apps are ad-hoc signed for local distribution; macOS may require Control-click → **Open** the first time they are launched.
 
