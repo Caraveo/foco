@@ -721,12 +721,27 @@ private final class FocoTextView: NSTextView {
 
     private func drawGhostSuggestion() {
         guard let ghostSuggestion, !ghostSuggestion.isEmpty, selectedRange().length == 0,
-              let insertionPoint = insertionPoint() else { return }
+              let insertionPoint = insertionPoint(), let textContainer else { return }
+        let font = NSFont(name: "Courier", size: 16) ?? .monospacedSystemFont(ofSize: 16, weight: .regular)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont(name: "Courier", size: 16) ?? .monospacedSystemFont(ofSize: 16, weight: .regular),
+            .font: font,
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
-        (ghostSuggestion as NSString).draw(at: insertionPoint, withAttributes: attributes)
+        let left = textContainerOrigin.x
+        let right = left + textContainer.size.width
+        let remainingWidth = right - insertionPoint.x
+        let wrapsToNextLine = remainingWidth < 28
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let origin = wrapsToNextLine
+            ? NSPoint(x: left, y: insertionPoint.y + lineHeight)
+            : insertionPoint
+        let width = wrapsToNextLine ? textContainer.size.width : remainingWidth
+        let rect = NSRect(x: origin.x, y: origin.y, width: max(1, width), height: lineHeight * 3)
+        (ghostSuggestion as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes
+        )
     }
 
     private func drawCoachNote() {
