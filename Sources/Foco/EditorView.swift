@@ -180,7 +180,7 @@ struct EditorView: View {
                         ZStack(alignment: .topLeading) {
                             if page.content.isEmpty {
                                 Text("Type ‘/’ for commands, or just start writing…")
-                                    .font(.system(size: 16))
+                                    .font(.custom("Courier", size: 16))
                                     .foregroundStyle(.tertiary)
                                     .padding(.top, 1)
                                     .allowsHitTesting(false)
@@ -1223,6 +1223,8 @@ private struct RichTextEditor: NSViewRepresentable {
         var parent: RichTextEditor
         private var styling = false
         var updatingFromSwiftUI = false
+        private static let writingFont = NSFont(name: "Courier", size: 16)
+            ?? NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         init(_ parent: RichTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
@@ -1267,7 +1269,7 @@ private struct RichTextEditor: NSViewRepresentable {
             paragraph.paragraphSpacing = 7
             storage.beginEditing()
             storage.setAttributes([
-                .font: NSFont.systemFont(ofSize: 16),
+                .font: Self.writingFont,
                 .foregroundColor: NSColor.labelColor,
                 .paragraphStyle: paragraph
             ], range: all)
@@ -1487,7 +1489,7 @@ private struct RichTextEditor: NSViewRepresentable {
             }
             storage.endEditing()
             view.typingAttributes = [
-                .font: NSFont.systemFont(ofSize: 16),
+                .font: Self.writingFont,
                 .foregroundColor: NSColor.labelColor,
                 .paragraphStyle: paragraph
             ]
