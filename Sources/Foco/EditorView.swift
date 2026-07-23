@@ -138,6 +138,9 @@ struct EditorView: View {
     @State private var selectedRange = NSRange(location: 0, length: 0)
     @State private var slashSelection = 0
     @State private var editorHeight: CGFloat = 180
+    @State private var showingPolish = false
+    @State private var polishSelection = ""
+    @AppStorage("foco.manuscriptTheme") private var manuscriptTheme = "system"
 
     var body: some View {
         GeometryReader { _ in
@@ -170,6 +173,23 @@ struct EditorView: View {
                             .frame(width: 150)
                             
                             Spacer()
+
+                            Text("\(wordCount) words")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                            Button("Polish Selection") {
+                                polishSelection = selectedText
+                                showingPolish = true
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(selectedText.isEmpty)
+                            Picker("Manuscript theme", selection: $manuscriptTheme) {
+                                Text("System").tag("system")
+                                Text("Light").tag("light")
+                                Text("Dark").tag("dark")
+                            }
+                            .labelsHidden()
+                            .frame(width: 82)
                             
                             Text("Saved in this vault")
                                 .font(.system(size: 11))
@@ -240,6 +260,12 @@ struct EditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.22, dampingFraction: 0.88), value: slashQuery != nil)
         .onChange(of: slashQuery) { _, _ in slashSelection = 0 }
+        .preferredColorScheme(manuscriptTheme == "system" ? nil : manuscriptTheme == "dark" ? .dark : .light)
+        .sheet(isPresented: $showingPolish) {
+            PolishSelectionSheet(selection: polishSelection) { revision in
+                replaceSelection(with: revision)
+            }
+        }
     }
 
     private var referencedAssets: [VaultAsset] {
@@ -250,6 +276,23 @@ struct EditorView: View {
             result.append(asset)
         }
         return result
+    }
+
+    private var selectedText: String {
+        let source = page.content as NSString
+        guard selectedRange.location != NSNotFound, NSMaxRange(selectedRange) <= source.length else { return "" }
+        return source.substring(with: selectedRange)
+    }
+
+    private var wordCount: Int {
+        page.content.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+    }
+
+    private func replaceSelection(with revision: String) {
+        let source = page.content as NSString
+        guard NSMaxRange(selectedRange) <= source.length else { return }
+        page.content = source.replacingCharacters(in: selectedRange, with: revision)
+        selectedRange = NSRange(location: selectedRange.location + revision.utf16.count, length: 0)
     }
 
     private func insert(_ kind: InsertKind) {
@@ -540,6 +583,41 @@ private enum SlashKey {
     case up, down, commit, escape
 }
 
+private struct PolishSelectionSheet: View {
+    let selection: String
+    let onReplace: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var revision = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Polish Selection").font(.title2.weight(.semibold))
+            Text("Choose an editorial direction. This is separate from predictive text.").foregroundStyle(.secondary)
+            HStack {
+                ForEach(PolishStyle.allCases) { style in
+                    Button(style.rawValue) { polish(style) }.disabled(isLoading)
+                }
+            }
+            TextEditor(text: $revision).font(.custom("Courier", size: 14)).frame(minHeight: 180)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
+            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Replace Selection") { onReplace(revision); dismiss() }.disabled(revision.isEmpty || isLoading).keyboardShortcut(.defaultAction) }
+        }
+        .padding(20).frame(width: 560, height: 360)
+    }
+
+    private func polish(_ style: PolishStyle) {
+        isLoading = true; errorMessage = nil
+        Task {
+            do { revision = try await XAIWritingService.shared.polish(selection, style: style) }
+            catch { errorMessage = error.localizedDescription }
+            isLoading = false
+        }
+    }
+}
+
 private final class FocoTextView: NSTextView {
     var slashMenuVisible: (() -> Bool)?
     var onSlashKey: ((SlashKey) -> Void)?
@@ -550,6 +628,9 @@ private final class FocoTextView: NSTextView {
     var onDeleteStructuredBlock: ((FocoStructuredBlock) -> Void)?
     var onMoveStructuredBlock: ((UUID, Int) -> Void)?
     var onMoveStructuredBlockBy: ((UUID, Int) -> Void)?
+    var onAcceptPrediction: (() -> Void)?
+    var onDismissPrediction: (() -> Void)?
+    private var ghostSuggestion: String?
     private var inlineAssetViews: [UUID: NSHostingView<AnyView>] = [:]
     private var inlineAssets: [UUID: VaultAsset] = [:]
     private var inlineBlockViews: [UUID: NSHostingView<AnyView>] = [:]
@@ -634,6 +715,11 @@ private final class FocoTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if ghostSuggestion != nil {
+            if event.keyCode == 48 { onAcceptPrediction?(); return }
+            if event.keyCode == 53 { onDismissPrediction?(); return }
+            if event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { onDismissPrediction?() }
+        }
         if slashMenuVisible?() == true {
             let key: SlashKey?
             switch event.keyCode {
@@ -649,6 +735,22 @@ private final class FocoTextView: NSTextView {
             }
         }
         super.keyDown(with: event)
+    }
+
+    func setGhostSuggestion(_ value: String?) {
+        ghostSuggestion = value?.isEmpty == false ? value : nil
+        needsDisplay = true
+    }
+
+    private func drawGhostSuggestion() {
+        guard let ghostSuggestion, !ghostSuggestion.isEmpty, selectedRange().length == 0,
+              let layoutManager else { return }
+        let character = min(selectedRange().location, string.utf16.count)
+        let glyph = layoutManager.glyphIndexForCharacter(at: character)
+        let line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        let point = layoutManager.location(forGlyphAt: glyph)
+        let origin = NSPoint(x: line.origin.x + point.x, y: line.origin.y + point.y)
+        (ghostSuggestion as NSString).draw(at: origin, withAttributes: [.font: NSFont(name: "Courier", size: 16) ?? .monospacedSystemFont(ofSize: 16, weight: .regular), .foregroundColor: NSColor.tertiaryLabelColor])
     }
 
     override func insertNewline(_ sender: Any?) {
@@ -707,6 +809,7 @@ private final class FocoTextView: NSTextView {
         drawBlockDecorations()
         super.draw(dirtyRect)
         drawDragInsertionIndicator()
+        drawGhostSuggestion()
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
@@ -1158,6 +1261,12 @@ private struct RichTextEditor: NSViewRepresentable {
         view.onSlashKey = { [weak coordinator = context.coordinator] key in
             coordinator?.parent.onSlashKey(key)
         }
+        view.onAcceptPrediction = { [weak coordinator = context.coordinator, weak view] in
+            coordinator?.acceptPrediction(in: view)
+        }
+        view.onDismissPrediction = { [weak coordinator = context.coordinator, weak view] in
+            coordinator?.dismissPrediction(in: view)
+        }
         view.onDeleteAsset = { [weak coordinator = context.coordinator] assetID in
             coordinator?.parent.onDeleteAsset(assetID)
         }
@@ -1223,6 +1332,7 @@ private struct RichTextEditor: NSViewRepresentable {
         var parent: RichTextEditor
         private var styling = false
         var updatingFromSwiftUI = false
+        private let predictor = XAIInlinePredictor()
         private static let writingFont = NSFont(name: "Courier", size: 16)
             ?? NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         init(_ parent: RichTextEditor) { self.parent = parent }
@@ -1234,6 +1344,9 @@ private struct RichTextEditor: NSViewRepresentable {
             parent.text = view.string
             parent.selectedRange = selection
             parent.slashQuery = Self.query(before: selection.location, in: view.string)
+            predictor.schedule(text: view.string, cursor: selection.location) { [weak view] suggestion in
+                view?.setGhostSuggestion(suggestion)
+            }
             style(view)
             updateHeight(view)
         }
@@ -1243,9 +1356,22 @@ private struct RichTextEditor: NSViewRepresentable {
                   let view = notification.object as? FocoTextView else { return }
             let selection = view.selectedRange()
             parent.selectedRange = selection
+            dismissPrediction(in: view)
             if parent.slashQuery != nil {
                 parent.slashQuery = Self.query(before: selection.location, in: view.string)
             }
+        }
+
+        func acceptPrediction(in view: FocoTextView?) {
+            guard let view, !predictor.suggestion.isEmpty else { return }
+            let suggestion = predictor.suggestion
+            dismissPrediction(in: view)
+            view.insertText(suggestion, replacementRange: view.selectedRange())
+        }
+
+        func dismissPrediction(in view: FocoTextView?) {
+            predictor.cancel()
+            view?.setGhostSuggestion(nil)
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
