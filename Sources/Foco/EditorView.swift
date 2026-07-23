@@ -678,7 +678,7 @@ private final class FocoTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if ghostSuggestion != nil {
-            if event.keyCode == 48 { onAcceptPrediction?(); return }
+            if event.keyCode == 48, !isAtParagraphStart() { onAcceptPrediction?(); return }
             if event.keyCode == 53 { onDismissPrediction?(); return }
             if event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { onDismissPrediction?() }
         }
@@ -697,6 +697,22 @@ private final class FocoTextView: NSTextView {
             }
         }
         super.keyDown(with: event)
+    }
+
+    override func insertTab(_ sender: Any?) {
+        // Tabs are reserved for accepting an inline completion. At the start of
+        // a paragraph, indent with spaces so the Markdown table renderer never
+        // mistakes the line for tab-separated cells.
+        guard isAtParagraphStart() else { return }
+        insertText("    ", replacementRange: selectedRange())
+    }
+
+    private func isAtParagraphStart() -> Bool {
+        let selection = selectedRange()
+        guard selection.length == 0 else { return false }
+        let prefix = (string as NSString).substring(to: min(selection.location, string.utf16.count))
+        let currentLine = prefix.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
+        return currentLine.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     func setGhostSuggestion(_ value: String?) {
