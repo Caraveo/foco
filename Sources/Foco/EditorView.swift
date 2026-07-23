@@ -193,6 +193,7 @@ struct EditorView: View {
                             RichTextEditor(
                                 text: $page.content,
                                 writingContext: page.writingContext ?? "",
+                                onContextUpdate: { page.writingContext = $0 },
                                 slashQuery: $slashQuery,
                                 selectedRange: $selectedRange,
                                 editorHeight: $editorHeight,
@@ -570,7 +571,7 @@ private struct PageWritingContextSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Page Writing Context").font(.title2.weight(.semibold))
-            Text("Describe the work, scene, voice, POV, characters, and constraints. Foco sends this compact brief with this page’s AI requests.").foregroundStyle(.secondary)
+            Text("Foco sends this compact brief with this page’s AI requests. With automatic context enabled, it refreshes this note from the latest paragraph.").foregroundStyle(.secondary)
             TextEditor(text: $context).font(.custom("Courier", size: 14)).frame(minHeight: 180)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
@@ -735,6 +736,16 @@ private final class FocoTextView: NSTextView {
         return NSPoint(x: textContainerOrigin.x + rect.maxX, y: textContainerOrigin.y + rect.minY)
     }
 
+    private func remainingLineWidth(at point: NSPoint) -> CGFloat? {
+        guard let layoutManager, let textContainer else { return nil }
+        let character = min(selectedRange().location, string.utf16.count)
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: NSRange(location: 0, length: character), actualCharacterRange: nil)
+        guard glyphRange.length > 0 else { return textContainer.size.width }
+        let lastGlyph = glyphRange.location + glyphRange.length - 1
+        let line = layoutManager.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil)
+        return max(0, textContainerOrigin.x + line.maxX - point.x)
+    }
+
     private func drawGhostSuggestion() {
         guard let ghostSuggestion, !ghostSuggestion.isEmpty, selectedRange().length == 0,
               let insertionPoint = insertionPoint(), let textContainer else { return }
@@ -744,20 +755,16 @@ private final class FocoTextView: NSTextView {
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
         let left = textContainerOrigin.x
-        let right = left + textContainer.size.width
-        let remainingWidth = right - insertionPoint.x
-        let wrapsToNextLine = remainingWidth < 28
+        let remainingWidth = remainingLineWidth(at: insertionPoint) ?? textContainer.size.width
+        let suggestionWidth = (ghostSuggestion as NSString).size(withAttributes: attributes).width
+        let wrapsToNextLine = suggestionWidth > remainingWidth
         let lineHeight = ceil(font.ascender - font.descender + font.leading)
-        let origin = wrapsToNextLine
-            ? NSPoint(x: left, y: insertionPoint.y + lineHeight)
-            : insertionPoint
-        let width = wrapsToNextLine ? textContainer.size.width : remainingWidth
-        let rect = NSRect(x: origin.x, y: origin.y, width: max(1, width), height: lineHeight * 3)
-        (ghostSuggestion as NSString).draw(
-            with: rect,
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes
-        )
+        guard wrapsToNextLine else {
+            (ghostSuggestion as NSString).draw(at: insertionPoint, withAttributes: attributes)
+            return
+        }
+        let rect = NSRect(x: left, y: insertionPoint.y + lineHeight, width: textContainer.size.width, height: lineHeight * 3)
+        (ghostSuggestion as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
     }
 
     private func drawCoachNote() {
@@ -1227,6 +1234,7 @@ private final class FocoTextView: NSTextView {
 private struct RichTextEditor: NSViewRepresentable {
     @Binding var text: String
     let writingContext: String
+    let onContextUpdate: (String) -> Void
     @Binding var slashQuery: String?
     @Binding var selectedRange: NSRange
     @Binding var editorHeight: CGFloat
@@ -1354,6 +1362,7 @@ private struct RichTextEditor: NSViewRepresentable {
         var updatingFromSwiftUI = false
         private let predictor = XAIInlinePredictor()
         private let coach = XAIWritingCoach()
+        private let contextController = XAIPageContextController()
         private static let writingFont = NSFont(name: "Courier", size: 16)
             ?? NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         init(_ parent: RichTextEditor) { self.parent = parent }
@@ -1370,6 +1379,9 @@ private struct RichTextEditor: NSViewRepresentable {
             }
             coach.update(text: view.string, cursor: selection.location, writingContext: parent.writingContext) { [weak view] note in
                 view?.setCoachNote(note)
+            }
+            contextController.observe(text: view.string) { [weak self] summary in
+                self?.parent.onContextUpdate(summary)
             }
             style(view)
             updateHeight(view)

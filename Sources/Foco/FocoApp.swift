@@ -77,6 +77,7 @@ private struct WritingSettingsView: View {
                     .foregroundStyle(.secondary)
                     .help("While you type, a separate xAI stream flags only clear grammar, punctuation, clarity, or tone issues. It stops and disappears when you pause.")
             }
+            Toggle("Build page context automatically", isOn: $xai.automaticContextEnabled)
             SecureField("xAI API key", text: $xai.apiKey)
                 .textFieldStyle(.roundedBorder)
             Picker("Manuscript appearance", selection: $manuscriptTheme) {

@@ -14,6 +14,9 @@ final class XAIWritingService: ObservableObject {
     @Published var liveCoachEnabled: Bool {
         didSet { UserDefaults.standard.set(liveCoachEnabled, forKey: Self.coachEnabledKey) }
     }
+    @Published var automaticContextEnabled: Bool {
+        didSet { UserDefaults.standard.set(automaticContextEnabled, forKey: Self.contextEnabledKey) }
+    }
     @Published var apiKey: String {
         didSet { Keychain.store(apiKey, account: Self.keyAccount) }
     }
@@ -21,6 +24,7 @@ final class XAIWritingService: ObservableObject {
     private static let enabledKey = "xai.inlinePrediction.enabled"
     private static let maxWordsKey = "xai.inlinePrediction.maxWords"
     private static let coachEnabledKey = "xai.liveCoach.enabled"
+    private static let contextEnabledKey = "xai.pageContext.enabled"
     private static let keyAccount = "xai.api-key"
     private let endpoint = URL(string: "https://api.x.ai/v1/chat/completions")!
     private let autocompletePrompt = "You are an invisible fiction autocomplete engine. Predict only the next 3–12 words. Preserve the author’s tense, POV, voice, punctuation, and current sentence rhythm. Do not explain. Do not add a new plot point. Do not output quotes, labels, or markdown. If no confident continuation exists, return an empty response."
@@ -30,6 +34,7 @@ final class XAIWritingService: ObservableObject {
         maxSuggestionWords = min(10, max(1, UserDefaults.standard.integer(forKey: Self.maxWordsKey)))
         if UserDefaults.standard.object(forKey: Self.maxWordsKey) == nil { maxSuggestionWords = 10 }
         liveCoachEnabled = UserDefaults.standard.object(forKey: Self.coachEnabledKey) as? Bool ?? false
+        automaticContextEnabled = UserDefaults.standard.object(forKey: Self.contextEnabledKey) as? Bool ?? true
         apiKey = Keychain.value(account: Self.keyAccount) ?? ""
     }
 
@@ -56,6 +61,24 @@ final class XAIWritingService: ObservableObject {
                   let content = delta["content"] as? String else { continue }
             onDelta(content)
         }
+    }
+
+    func summarizeParagraph(_ paragraph: String) async throws -> String {
+        let payload: [String: Any] = [
+            "model": "grok-4.20-0309-non-reasoning",
+            "stream": false,
+            "max_tokens": 48,
+            "messages": [
+                ["role": "system", "content": "Summarize the supplied fiction paragraph in exactly one concise sentence for a writing-context note. Preserve its POV, tense, scene purpose, and important facts. Return only the sentence."],
+                ["role": "user", "content": paragraph]
+            ]
+        ]
+        let (data, response) = try await URLSession.shared.data(for: makeRequest(payload))
+        try validate(response)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let choices = json?["choices"] as? [[String: Any]]
+        return ((choices?.first?["message"] as? [String: Any])?["content"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func streamAutocomplete(context: String, writingContext: String, onDelta: @escaping @MainActor (String) -> Void) async throws {
@@ -195,6 +218,39 @@ final class XAIWritingCoach {
 
     private static func limit(_ value: String) -> String {
         value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).prefix(10).joined(separator: " ")
+    }
+}
+
+@MainActor
+final class XAIPageContextController {
+    private var task: Task<Void, Never>?
+    private var requestID = 0
+    private var summarizedParagraph = ""
+
+    func observe(text: String, update: @escaping (String) -> Void) {
+        task?.cancel()
+        guard XAIWritingService.shared.automaticContextEnabled else { return }
+        let paragraph = Self.latestParagraph(in: text)
+        guard paragraph.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count >= 20,
+              paragraph != summarizedParagraph else { return }
+        requestID += 1
+        let id = requestID
+        task = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !Task.isCancelled, self.requestID == id else { return }
+            do {
+                let summary = try await XAIWritingService.shared.summarizeParagraph(paragraph)
+                guard !Task.isCancelled, self.requestID == id, !summary.isEmpty else { return }
+                self.summarizedParagraph = paragraph
+                update(summary)
+            } catch { }
+        }
+    }
+
+    private static func latestParagraph(in text: String) -> String {
+        text.components(separatedBy: "\n\n")
+            .last?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
