@@ -16,6 +16,9 @@ struct FocoApp: App {
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            Task { @MainActor in RecentBulbDocument.reopen() }
+        }
     }
 
     var body: some Scene {
@@ -28,6 +31,28 @@ struct FocoApp: App {
 
         Settings {
             WritingSettingsView()
+        }
+    }
+}
+
+@MainActor
+enum RecentBulbDocument {
+    private static let key = "foco.lastBulbURL"
+
+    static func remember(_ url: URL?) {
+        guard let url, url.pathExtension.lowercased() == "bulb" else { return }
+        UserDefaults.standard.set(url.path, forKey: key)
+    }
+
+    static func reopen() {
+        guard let path = UserDefaults.standard.string(forKey: key) else { return }
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+            if error != nil { UserDefaults.standard.removeObject(forKey: key) }
         }
     }
 }

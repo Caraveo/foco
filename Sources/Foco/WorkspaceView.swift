@@ -75,11 +75,13 @@ struct WorkspaceView: View {
         )
         .onAppear {
             document.adoptFileURL(fileURL)
+            RecentBulbDocument.remember(fileURL)
             selectedPageID = selectedPageID ?? document.manifest.pages.first?.id
             document.selectPage(selectedPageID)
         }
         .onChange(of: fileURL) { _, newURL in
             document.adoptFileURL(newURL)
+            RecentBulbDocument.remember(newURL)
             selectedPageID = document.manifest.pages.first?.id
             document.selectPage(selectedPageID)
         }
