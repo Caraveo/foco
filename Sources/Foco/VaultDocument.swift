@@ -12,6 +12,8 @@ struct VaultPage: Codable, Identifiable, Hashable, Sendable {
     var blockIDs: [UUID]? = nil
     var blocks: [FocoStructuredBlock]? = nil
     var category: String? = nil
+    /// A short, page-specific creative brief sent with AI writing requests.
+    var writingContext: String? = nil
 }
 
 struct VaultAsset: Codable, Identifiable, Hashable, Sendable {
@@ -410,7 +412,9 @@ private final class BulbArchive: @unchecked Sendable {
                 content: content,
                 assetIDs: summary.assetIDs,
                 blockIDs: references.map(\.id),
-                blocks: blocks
+                blocks: blocks,
+                category: summary.category,
+                writingContext: summary.writingContext
             )
         }
     }
@@ -524,7 +528,7 @@ private final class BulbArchive: @unchecked Sendable {
         var manifest = old
         manifest.version = 6
         manifest.pages = old.pages.map {
-            VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs, blockIDs: $0.blockIDs)
+            VaultPage(id: $0.id, title: $0.title, content: "", assetIDs: $0.assetIDs, blockIDs: $0.blockIDs, category: $0.category, writingContext: $0.writingContext)
         }
         try archive.initialize(manifest: manifest, pages: old.pages)
         for asset in old.assets {
@@ -549,7 +553,9 @@ private final class BulbArchive: @unchecked Sendable {
                 content: "",
                 assetIDs: $0.assetIDs,
                 blockIDs: $0.blocks?.map(\.id) ?? $0.blockIDs,
-                blocks: nil
+                blocks: nil,
+                category: $0.category,
+                writingContext: $0.writingContext
             )
         }
         let encoder = JSONEncoder()

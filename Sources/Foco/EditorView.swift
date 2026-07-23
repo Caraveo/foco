@@ -139,6 +139,7 @@ struct EditorView: View {
     @State private var slashSelection = 0
     @State private var editorHeight: CGFloat = 180
     @State private var showingPolish = false
+    @State private var showingWritingContext = false
     @State private var polishSelection = ""
     @AppStorage("foco.manuscriptTheme") private var manuscriptTheme = "system"
 
@@ -177,6 +178,8 @@ struct EditorView: View {
                             Text("\(wordCount) words")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)
+                            Button("Context") { showingWritingContext = true }
+                                .buttonStyle(.borderless)
                             Button("Polish Selection") {
                                 polishSelection = selectedText
                                 showingPolish = true
@@ -207,6 +210,7 @@ struct EditorView: View {
                             }
                             RichTextEditor(
                                 text: $page.content,
+                                writingContext: page.writingContext ?? "",
                                 slashQuery: $slashQuery,
                                 selectedRange: $selectedRange,
                                 editorHeight: $editorHeight,
@@ -262,9 +266,12 @@ struct EditorView: View {
         .onChange(of: slashQuery) { _, _ in slashSelection = 0 }
         .preferredColorScheme(manuscriptTheme == "system" ? nil : manuscriptTheme == "dark" ? .dark : .light)
         .sheet(isPresented: $showingPolish) {
-            PolishSelectionSheet(selection: polishSelection) { revision in
+            PolishSelectionSheet(selection: polishSelection, writingContext: page.writingContext ?? "") { revision in
                 replaceSelection(with: revision)
             }
+        }
+        .sheet(isPresented: $showingWritingContext) {
+            PageWritingContextSheet(context: Binding(get: { page.writingContext ?? "" }, set: { page.writingContext = $0.isEmpty ? nil : $0 }))
         }
     }
 
@@ -583,8 +590,25 @@ private enum SlashKey {
     case up, down, commit, escape
 }
 
+private struct PageWritingContextSheet: View {
+    @Binding var context: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Page Writing Context").font(.title2.weight(.semibold))
+            Text("Describe the work, scene, voice, POV, characters, and constraints. Foco sends this compact brief with this page’s AI requests.").foregroundStyle(.secondary)
+            TextEditor(text: $context).font(.custom("Courier", size: 14)).frame(minHeight: 180)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(20).frame(width: 560, height: 320)
+    }
+}
+
 private struct PolishSelectionSheet: View {
     let selection: String
+    let writingContext: String
     let onReplace: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var revision = ""
@@ -611,7 +635,7 @@ private struct PolishSelectionSheet: View {
     private func polish(_ style: PolishStyle) {
         isLoading = true; errorMessage = nil
         Task {
-            do { revision = try await XAIWritingService.shared.polish(selection, style: style) }
+            do { revision = try await XAIWritingService.shared.polish(selection, style: style, writingContext: writingContext) }
             catch { errorMessage = error.localizedDescription }
             isLoading = false
         }
@@ -1207,6 +1231,7 @@ private final class FocoTextView: NSTextView {
 
 private struct RichTextEditor: NSViewRepresentable {
     @Binding var text: String
+    let writingContext: String
     @Binding var slashQuery: String?
     @Binding var selectedRange: NSRange
     @Binding var editorHeight: CGFloat
@@ -1344,7 +1369,7 @@ private struct RichTextEditor: NSViewRepresentable {
             parent.text = view.string
             parent.selectedRange = selection
             parent.slashQuery = Self.query(before: selection.location, in: view.string)
-            predictor.schedule(text: view.string, cursor: selection.location) { [weak view] suggestion in
+            predictor.schedule(text: view.string, cursor: selection.location, writingContext: parent.writingContext) { [weak view] suggestion in
                 view?.setGhostSuggestion(suggestion)
             }
             style(view)

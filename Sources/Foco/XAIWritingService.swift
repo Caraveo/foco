@@ -22,14 +22,14 @@ final class XAIWritingService: ObservableObject {
         apiKey = Keychain.value(account: Self.keyAccount) ?? ""
     }
 
-    func streamAutocomplete(context: String, onDelta: @escaping @MainActor (String) -> Void) async throws {
+    func streamAutocomplete(context: String, writingContext: String, onDelta: @escaping @MainActor (String) -> Void) async throws {
         let payload: [String: Any] = [
             "model": "grok-4.20-0309-non-reasoning",
             "stream": true,
             "max_tokens": 32,
             "messages": [
                 ["role": "system", "content": autocompletePrompt],
-                ["role": "user", "content": "Continue this manuscript exactly at the cursor. Return only the continuation.\\n\\n\(context)"]
+                ["role": "user", "content": "Page writing context (follow this when relevant):\\n\(writingContext.prefix(1_200))\\n\\nContinue this manuscript exactly at the cursor. Return only the continuation.\\n\\n\(context)"]
             ]
         ]
         var request = try makeRequest(payload)
@@ -49,13 +49,13 @@ final class XAIWritingService: ObservableObject {
         }
     }
 
-    func polish(_ selection: String, style: PolishStyle) async throws -> String {
+    func polish(_ selection: String, style: PolishStyle, writingContext: String) async throws -> String {
         let payload: [String: Any] = [
             "model": "grok-4.20-0309-non-reasoning",
             "stream": false,
             "messages": [
                 ["role": "system", "content": "You are a precise fiction editor. Return only a revised version of the selected text. Preserve its meaning, POV, tense, and facts. Do not explain your changes."],
-                ["role": "user", "content": "Revise this selection to be \(style.instruction):\\n\\n\(selection)"]
+                ["role": "user", "content": "Page writing context:\\n\(writingContext.prefix(1_200))\\n\\nRevise this selection to be \(style.instruction):\\n\\n\(selection)"]
             ]
         ]
         let (data, response) = try await URLSession.shared.data(for: makeRequest(payload))
@@ -97,7 +97,7 @@ final class XAIInlinePredictor {
     private(set) var requestID = 0
     private(set) var suggestion = ""
 
-    func schedule(text: String, cursor: Int, update: @escaping (String) -> Void) {
+    func schedule(text: String, cursor: Int, writingContext: String, update: @escaping (String) -> Void) {
         cancel()
         guard XAIWritingService.shared.autocompleteEnabled else { return }
         let source = text as NSString
@@ -111,7 +111,7 @@ final class XAIInlinePredictor {
             guard !Task.isCancelled, self?.requestID == id else { return }
             var received = ""
             do {
-                try await XAIWritingService.shared.streamAutocomplete(context: context) { delta in
+                try await XAIWritingService.shared.streamAutocomplete(context: context, writingContext: writingContext) { delta in
                     guard let self, self.requestID == id, !Task.isCancelled else { return }
                     received = Self.limitWords(received + delta)
                     self.suggestion = received
