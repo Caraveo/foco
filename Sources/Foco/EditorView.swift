@@ -173,18 +173,8 @@ struct EditorView: View {
                             
                             Spacer()
 
-                            Text("\(wordCount) words")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
                             Button("Context") { showingWritingContext = true }
                                 .buttonStyle(.borderless)
-                            Picker("Manuscript theme", selection: $manuscriptTheme) {
-                                Text("System").tag("system")
-                                Text("Light").tag("light")
-                                Text("Dark").tag("dark")
-                            }
-                            .labelsHidden()
-                            .frame(width: 82)
                             
                             Text("Saved in this vault")
                                 .font(.system(size: 11))
@@ -250,6 +240,15 @@ struct EditorView: View {
                     )
                     .zIndex(10)
             }
+
+            HStack {
+                Spacer()
+                Text("\(wordCount) words")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 12)
           }
         }
         .background(FocoTheme.canvas)

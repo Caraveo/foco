@@ -34,12 +34,18 @@ struct FocoApp: App {
 
 private struct WritingSettingsView: View {
     @ObservedObject private var xai = XAIWritingService.shared
+    @AppStorage("foco.manuscriptTheme") private var manuscriptTheme = "system"
 
     var body: some View {
         Form {
             Toggle("Enable inline predictive text", isOn: $xai.autocompleteEnabled)
             SecureField("xAI API key", text: $xai.apiKey)
                 .textFieldStyle(.roundedBorder)
+            Picker("Manuscript appearance", selection: $manuscriptTheme) {
+                Text("System").tag("system")
+                Text("Light").tag("light")
+                Text("Dark").tag("dark")
+            }
             Text("Your key is stored in this Mac’s Keychain. Foco sends only up to 250 words immediately before the cursor.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
