@@ -1366,7 +1366,16 @@ private struct RichTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !styling, !updatingFromSwiftUI,
                   let view = notification.object as? FocoTextView else { return }
-            let selection = view.selectedRange()
+            var selection = view.selectedRange()
+            if view.string.contains("…") {
+                let source = view.string as NSString
+                let prefix = source.substring(to: min(selection.location, source.length))
+                let normalized = view.string.replacingOccurrences(of: "…", with: "...")
+                let normalizedLocation = prefix.replacingOccurrences(of: "…", with: "...").utf16.count
+                view.string = normalized
+                selection = NSRange(location: normalizedLocation, length: selection.length)
+                view.setSelectedRange(selection)
+            }
             parent.text = view.string
             parent.selectedRange = selection
             parent.slashQuery = Self.query(before: selection.location, in: view.string)
