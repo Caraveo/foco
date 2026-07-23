@@ -175,10 +175,6 @@ struct EditorView: View {
 
                             Button("Context") { showingWritingContext = true }
                                 .buttonStyle(.borderless)
-                            
-                            Text("Saved in this vault")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
                         }
                         .padding(.bottom, 25)
 
@@ -763,7 +759,7 @@ private final class FocoTextView: NSTextView {
             (ghostSuggestion as NSString).draw(at: insertionPoint, withAttributes: attributes)
             return
         }
-        let rect = NSRect(x: left, y: insertionPoint.y + lineHeight, width: textContainer.size.width, height: lineHeight * 3)
+        let rect = NSRect(x: left, y: insertionPoint.y + lineHeight + 6, width: textContainer.size.width, height: lineHeight * 3)
         (ghostSuggestion as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
     }
 
