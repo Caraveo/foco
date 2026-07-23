@@ -49,22 +49,6 @@ final class XAIWritingService: ObservableObject {
         }
     }
 
-    func polish(_ selection: String, style: PolishStyle, writingContext: String) async throws -> String {
-        let payload: [String: Any] = [
-            "model": "grok-4.20-0309-non-reasoning",
-            "stream": false,
-            "messages": [
-                ["role": "system", "content": "You are a precise fiction editor. Return only a revised version of the selected text. Preserve its meaning, POV, tense, and facts. Do not explain your changes."],
-                ["role": "user", "content": "Page writing context:\\n\(writingContext.prefix(1_200))\\n\\nRevise this selection to be \(style.instruction):\\n\\n\(selection)"]
-            ]
-        ]
-        let (data, response) = try await URLSession.shared.data(for: makeRequest(payload))
-        try validate(response)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let choices = json?["choices"] as? [[String: Any]]
-        return (choices?.first?["message"] as? [String: Any])?["content"] as? String ?? ""
-    }
-
     private func makeRequest(_ payload: [String: Any]) throws -> URLRequest {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw XAIError.missingKey }
         var request = URLRequest(url: endpoint)
@@ -79,12 +63,6 @@ final class XAIWritingService: ObservableObject {
     private func validate(_ response: URLResponse) throws {
         guard let response = response as? HTTPURLResponse, 200..<300 ~= response.statusCode else { throw XAIError.requestFailed }
     }
-}
-
-enum PolishStyle: String, CaseIterable, Identifiable {
-    case clearer = "Clearer", tense = "More Tense", literary = "More Literary", spare = "More Spare"
-    var id: String { rawValue }
-    var instruction: String { rawValue.lowercased() }
 }
 
 enum XAIError: LocalizedError { case missingKey, requestFailed
@@ -113,7 +91,7 @@ final class XAIInlinePredictor {
             do {
                 try await XAIWritingService.shared.streamAutocomplete(context: context, writingContext: writingContext) { delta in
                     guard let self, self.requestID == id, !Task.isCancelled else { return }
-                    received = Self.limitWords(received + delta)
+                    received = Self.limitSuggestion(received + delta)
                     self.suggestion = received
                     update(received)
                 }
@@ -128,8 +106,12 @@ final class XAIInlinePredictor {
         suggestion = ""
     }
 
-    private static func limitWords(_ value: String) -> String {
-        value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).prefix(12).joined(separator: " ")
+    private static func limitSuggestion(_ value: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\S+"#) else { return value }
+        let range = NSRange(value.startIndex..., in: value)
+        let words = regex.matches(in: value, range: range)
+        guard words.count > 12, let cutoff = Range(words[12].range, in: value) else { return value }
+        return String(value[..<cutoff.lowerBound])
     }
 }
 
