@@ -80,6 +80,9 @@ final class XAIInlinePredictor {
         guard XAIWritingService.shared.autocompleteEnabled else { return }
         let source = text as NSString
         let prefix = source.substring(to: min(cursor, source.length))
+        // Let the writer establish a new sentence before offering a continuation.
+        guard let last = prefix.trimmingCharacters(in: .whitespacesAndNewlines).last,
+              !".!?".contains(last) else { return }
         let context = prefix.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).suffix(250).joined(separator: " ")
         guard !context.isEmpty else { return }
         requestID += 1

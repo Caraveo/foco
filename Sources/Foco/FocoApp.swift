@@ -63,7 +63,12 @@ private struct WritingSettingsView: View {
 
     var body: some View {
         Form {
-            Toggle("Enable inline predictive text", isOn: $xai.autocompleteEnabled)
+            HStack(spacing: 6) {
+                Toggle("Enable inline predictive text", isOn: $xai.autocompleteEnabled)
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .help("Suggestions use your recent words, grammar, and style to avoid mistakes and keep the right tone.")
+            }
             SecureField("xAI API key", text: $xai.apiKey)
                 .textFieldStyle(.roundedBorder)
             Picker("Manuscript appearance", selection: $manuscriptTheme) {
