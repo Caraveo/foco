@@ -297,10 +297,6 @@ private struct SidebarPageRow: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 8) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 17)
                 Text(page.title.isEmpty ? "Untitled" : page.title)
                     .font(.system(size: 13))
                     .lineLimit(1)
