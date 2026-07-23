@@ -153,7 +153,10 @@ final class XAIInlinePredictor {
             do {
                 try await XAIWritingService.shared.streamAutocomplete(context: context, writingContext: writingContext) { delta in
                     guard let self, self.requestID == id, !Task.isCancelled else { return }
-                    received = Self.limitSuggestion(received + delta, maxWords: maxWords)
+                    received = Self.inlineSuggestion(
+                        Self.limitSuggestion(received + delta, maxWords: maxWords),
+                        following: prefix
+                    )
                     self.suggestion = received
                     update(received)
                 }
@@ -174,6 +177,19 @@ final class XAIInlinePredictor {
         let words = regex.matches(in: value, range: range)
         guard words.count > maxWords, let cutoff = Range(words[maxWords].range, in: value) else { return value }
         return String(value[..<cutoff.lowerBound])
+    }
+
+    /// A space or comma already establishes inline prose. Normalize only the
+    /// leading join so the accepted suggestion reads as one continuous line.
+    private static func inlineSuggestion(_ value: String, following prefix: String) -> String {
+        guard let previous = prefix.last else { return value }
+        if previous.isWhitespace {
+            return String(value.drop(while: { $0.isWhitespace }))
+        }
+        if previous == ",", !value.isEmpty, !value.first!.isWhitespace {
+            return " " + value
+        }
+        return value
     }
 }
 
