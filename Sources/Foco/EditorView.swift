@@ -592,6 +592,7 @@ private final class FocoTextView: NSTextView {
     var onAcceptPrediction: (() -> Void)?
     var onDismissPrediction: (() -> Void)?
     private var ghostSuggestion: String?
+    private var coachNote: String?
     private var inlineAssetViews: [UUID: NSHostingView<AnyView>] = [:]
     private var inlineAssets: [UUID: VaultAsset] = [:]
     private var inlineBlockViews: [UUID: NSHostingView<AnyView>] = [:]
@@ -703,24 +704,40 @@ private final class FocoTextView: NSTextView {
         needsDisplay = true
     }
 
-    private func drawGhostSuggestion() {
-        guard let ghostSuggestion, !ghostSuggestion.isEmpty, selectedRange().length == 0,
-              let layoutManager, let textContainer else { return }
+    func setCoachNote(_ value: String?) {
+        coachNote = value?.isEmpty == false ? value : nil
+        needsDisplay = true
+    }
+
+    private func insertionPoint() -> NSPoint? {
+        guard let layoutManager, let textContainer else { return nil }
         let character = min(selectedRange().location, string.utf16.count)
         let glyphRange = layoutManager.glyphRange(forCharacterRange: NSRange(location: 0, length: character), actualCharacterRange: nil)
-        let insertionPoint: NSPoint
-        if glyphRange.length > 0 {
-            let lastGlyph = glyphRange.location + glyphRange.length - 1
-            let rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: lastGlyph, length: 1), in: textContainer)
-            insertionPoint = NSPoint(x: textContainerOrigin.x + rect.maxX, y: textContainerOrigin.y + rect.minY)
-        } else {
-            insertionPoint = textContainerOrigin
-        }
+        guard glyphRange.length > 0 else { return textContainerOrigin }
+        let lastGlyph = glyphRange.location + glyphRange.length - 1
+        let rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: lastGlyph, length: 1), in: textContainer)
+        return NSPoint(x: textContainerOrigin.x + rect.maxX, y: textContainerOrigin.y + rect.minY)
+    }
+
+    private func drawGhostSuggestion() {
+        guard let ghostSuggestion, !ghostSuggestion.isEmpty, selectedRange().length == 0,
+              let insertionPoint = insertionPoint() else { return }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont(name: "Courier", size: 16) ?? .monospacedSystemFont(ofSize: 16, weight: .regular),
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
         (ghostSuggestion as NSString).draw(at: insertionPoint, withAttributes: attributes)
+    }
+
+    private func drawCoachNote() {
+        guard let coachNote, !coachNote.isEmpty, selectedRange().length == 0,
+              let point = insertionPoint() else { return }
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+        let size = (coachNote as NSString).size(withAttributes: attributes)
+        let rect = NSRect(x: point.x, y: point.y - size.height - 13, width: size.width + 14, height: size.height + 8)
+        NSColor.controlBackgroundColor.withAlphaComponent(0.96).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+        (coachNote as NSString).draw(at: NSPoint(x: rect.minX + 7, y: rect.minY + 4), withAttributes: attributes)
     }
 
     override func insertNewline(_ sender: Any?) {
@@ -780,6 +797,7 @@ private final class FocoTextView: NSTextView {
         super.draw(dirtyRect)
         drawDragInsertionIndicator()
         drawGhostSuggestion()
+        drawCoachNote()
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
@@ -1304,6 +1322,7 @@ private struct RichTextEditor: NSViewRepresentable {
         private var styling = false
         var updatingFromSwiftUI = false
         private let predictor = XAIInlinePredictor()
+        private let coach = XAIWritingCoach()
         private static let writingFont = NSFont(name: "Courier", size: 16)
             ?? NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         init(_ parent: RichTextEditor) { self.parent = parent }
@@ -1315,8 +1334,11 @@ private struct RichTextEditor: NSViewRepresentable {
             parent.text = view.string
             parent.selectedRange = selection
             parent.slashQuery = Self.query(before: selection.location, in: view.string)
-            predictor.schedule(text: view.string, cursor: selection.location, writingContext: parent.writingContext) { [weak view] suggestion in
+            predictor.schedule(text: view.string, cursor: selection.location, writingContext: parent.writingContext, maxWords: XAIWritingService.shared.maxSuggestionWords) { [weak view] suggestion in
                 view?.setGhostSuggestion(suggestion)
+            }
+            coach.update(text: view.string, cursor: selection.location, writingContext: parent.writingContext) { [weak view] note in
+                view?.setCoachNote(note)
             }
             style(view)
             updateHeight(view)
@@ -1342,7 +1364,9 @@ private struct RichTextEditor: NSViewRepresentable {
 
         func dismissPrediction(in view: FocoTextView?) {
             predictor.cancel()
+            coach.cancel()
             view?.setGhostSuggestion(nil)
+            view?.setCoachNote(nil)
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {

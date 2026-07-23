@@ -69,6 +69,14 @@ private struct WritingSettingsView: View {
                     .foregroundStyle(.secondary)
                     .help("Suggestions use your recent words, grammar, and style to avoid mistakes and keep the right tone.")
             }
+            Stepper("Next suggestion: \(xai.maxSuggestionWords) words", value: $xai.maxSuggestionWords, in: 1...10)
+                .disabled(!xai.autocompleteEnabled)
+            HStack(spacing: 6) {
+                Toggle("Enable live writing coach", isOn: $xai.liveCoachEnabled)
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .help("While you type, a separate xAI stream flags only clear grammar, punctuation, clarity, or tone issues. It stops and disappears when you pause.")
+            }
             SecureField("xAI API key", text: $xai.apiKey)
                 .textFieldStyle(.roundedBorder)
             Picker("Manuscript appearance", selection: $manuscriptTheme) {

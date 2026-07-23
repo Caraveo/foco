@@ -3,7 +3,7 @@
 [![macOS](https://img.shields.io/badge/platform-macOS-blue.svg)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org/)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-5.0-blue.svg)](https://developer.apple.com/xcode/swiftui/)
-[![Version](https://img.shields.io/badge/version-0.2.8-blue.svg)](https://github.com/Caraveo/foco/releases)
+[![Version](https://img.shields.io/badge/version-0.2.9-blue.svg)](https://github.com/Caraveo/foco/releases)
 [![Status](https://img.shields.io/badge/status-PREALPHA-red.svg)](https://github.com/Caraveo/foco)
 
 Foco is a native macOS, document-based workspace inspired by Notion, with one important rule: **your work stays local**.
@@ -23,10 +23,10 @@ A native Windows 11 reader is available in [`win11`](win11/README.md). It opens 
 
 ## Release downloads
 
-Version [`v0.2.8`](https://github.com/Caraveo/foco/releases) includes separate macOS archives for the editor and the free reader:
+Version [`v0.2.9`](https://github.com/Caraveo/foco/releases) includes separate macOS archives for the editor and the free reader:
 
-- `Foco-macOS-v0.2.8.zip` — the editable Foco document app.
-- `Foco-View-macOS-v0.2.8.zip` — the read-only Foco View app.
+- `Foco-macOS-v0.2.9.zip` — the editable Foco document app.
+- `Foco-View-macOS-v0.2.9.zip` — the read-only Foco View app.
 
 Both require macOS 14 or newer. The release apps are ad-hoc signed for local distribution; macOS may require Control-click → **Open** the first time they are launched.
 

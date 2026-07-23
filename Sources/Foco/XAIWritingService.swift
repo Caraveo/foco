@@ -8,18 +8,54 @@ final class XAIWritingService: ObservableObject {
     @Published var autocompleteEnabled: Bool {
         didSet { UserDefaults.standard.set(autocompleteEnabled, forKey: Self.enabledKey) }
     }
+    @Published var maxSuggestionWords: Int {
+        didSet { UserDefaults.standard.set(maxSuggestionWords, forKey: Self.maxWordsKey) }
+    }
+    @Published var liveCoachEnabled: Bool {
+        didSet { UserDefaults.standard.set(liveCoachEnabled, forKey: Self.coachEnabledKey) }
+    }
     @Published var apiKey: String {
         didSet { Keychain.store(apiKey, account: Self.keyAccount) }
     }
 
     private static let enabledKey = "xai.inlinePrediction.enabled"
+    private static let maxWordsKey = "xai.inlinePrediction.maxWords"
+    private static let coachEnabledKey = "xai.liveCoach.enabled"
     private static let keyAccount = "xai.api-key"
     private let endpoint = URL(string: "https://api.x.ai/v1/chat/completions")!
     private let autocompletePrompt = "You are an invisible fiction autocomplete engine. Predict only the next 3–12 words. Preserve the author’s tense, POV, voice, punctuation, and current sentence rhythm. Do not explain. Do not add a new plot point. Do not output quotes, labels, or markdown. If no confident continuation exists, return an empty response."
 
     private init() {
         autocompleteEnabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? false
+        maxSuggestionWords = min(10, max(1, UserDefaults.standard.integer(forKey: Self.maxWordsKey)))
+        if UserDefaults.standard.object(forKey: Self.maxWordsKey) == nil { maxSuggestionWords = 10 }
+        liveCoachEnabled = UserDefaults.standard.object(forKey: Self.coachEnabledKey) as? Bool ?? false
         apiKey = Keychain.value(account: Self.keyAccount) ?? ""
+    }
+
+    func streamWritingCoach(context: String, writingContext: String, onDelta: @escaping @MainActor (String) -> Void) async throws {
+        let payload: [String: Any] = [
+            "model": "grok-4.20-0309-non-reasoning",
+            "stream": true,
+            "max_tokens": 32,
+            "messages": [
+                ["role": "system", "content": "You are a silent inline writing coach. Inspect only the supplied recent prose. Return at most 10 words only when there is a clear grammar, punctuation, clarity, or tone correction. State the correction directly. Do not explain, greet, use labels, markdown, or quote the prose. Return empty when no correction is needed."],
+                ["role": "user", "content": "Page writing context:\\n\(writingContext.prefix(1_200))\\n\\nRecent prose:\\n\(context)"]
+            ]
+        ]
+        let (bytes, response) = try await URLSession.shared.bytes(for: makeRequest(payload))
+        try validate(response)
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data: ") else { continue }
+            let value = String(line.dropFirst(6))
+            guard value != "[DONE]", let data = value.data(using: .utf8),
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any],
+                  let content = delta["content"] as? String else { continue }
+            onDelta(content)
+        }
     }
 
     func streamAutocomplete(context: String, writingContext: String, onDelta: @escaping @MainActor (String) -> Void) async throws {
@@ -75,7 +111,7 @@ final class XAIInlinePredictor {
     private(set) var requestID = 0
     private(set) var suggestion = ""
 
-    func schedule(text: String, cursor: Int, writingContext: String, update: @escaping (String) -> Void) {
+    func schedule(text: String, cursor: Int, writingContext: String, maxWords: Int, update: @escaping (String) -> Void) {
         cancel()
         guard XAIWritingService.shared.autocompleteEnabled else { return }
         let source = text as NSString
@@ -94,7 +130,7 @@ final class XAIInlinePredictor {
             do {
                 try await XAIWritingService.shared.streamAutocomplete(context: context, writingContext: writingContext) { delta in
                     guard let self, self.requestID == id, !Task.isCancelled else { return }
-                    received = Self.limitSuggestion(received + delta)
+                    received = Self.limitSuggestion(received + delta, maxWords: maxWords)
                     self.suggestion = received
                     update(received)
                 }
@@ -109,12 +145,56 @@ final class XAIInlinePredictor {
         suggestion = ""
     }
 
-    private static func limitSuggestion(_ value: String) -> String {
+    private static func limitSuggestion(_ value: String, maxWords: Int) -> String {
         guard let regex = try? NSRegularExpression(pattern: #"\S+"#) else { return value }
         let range = NSRange(value.startIndex..., in: value)
         let words = regex.matches(in: value, range: range)
-        guard words.count > 12, let cutoff = Range(words[12].range, in: value) else { return value }
+        guard words.count > maxWords, let cutoff = Range(words[maxWords].range, in: value) else { return value }
         return String(value[..<cutoff.lowerBound])
+    }
+}
+
+@MainActor
+final class XAIWritingCoach {
+    private var request: Task<Void, Never>?
+    private var pauseTimer: Task<Void, Never>?
+    private var requestID = 0
+
+    func update(text: String, cursor: Int, writingContext: String, show: @escaping (String) -> Void) {
+        cancel()
+        guard XAIWritingService.shared.liveCoachEnabled else { return }
+        let source = text as NSString
+        let prefix = source.substring(to: min(cursor, source.length))
+        let context = prefix.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).suffix(80).joined(separator: " ")
+        guard !context.isEmpty else { return }
+        requestID += 1
+        let id = requestID
+        var received = ""
+        request = Task { [weak self] in
+            do {
+                try await XAIWritingService.shared.streamWritingCoach(context: context, writingContext: writingContext) { delta in
+                    guard let self, self.requestID == id, !Task.isCancelled else { return }
+                    received = Self.limit(received + delta)
+                    show(received)
+                }
+            } catch { }
+        }
+        pauseTimer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard self?.requestID == id else { return }
+            self?.cancel()
+            show("")
+        }
+    }
+
+    func cancel() {
+        requestID += 1
+        request?.cancel(); request = nil
+        pauseTimer?.cancel(); pauseTimer = nil
+    }
+
+    private static func limit(_ value: String) -> String {
+        value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).prefix(10).joined(separator: " ")
     }
 }
 
